@@ -13,15 +13,24 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .const import (
     CONF_BRAND,
     CONF_CLIENT_ID,
+    CONF_DEVICE_ID,
+    CONF_DEVICE_NAME,
     CONF_ENDPOINT,
+    CONF_IP_ADDRESS,
+    CONF_LOCAL_KEY,
+    CONF_MODE,
+    CONF_PROTOCOL_VERSION,
     CONF_SCHEMA,
     CONF_SECRET,
     DEFAULT_ENDPOINT,
     DOMAIN,
     ENDPOINTS,
+    MODE_CLOUD,
+    MODE_LOCAL,
     OEM_PROFILES,
 )
 from .tuya_api import TuyaOEMAuthError, TuyaOEMClient, TuyaOEMError
+from .tuya_local import TuyaLocalDevice, async_discover_devices
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -31,8 +40,99 @@ class TuyaOEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
+    def __init__(self) -> None:
+        """Initialize flow."""
+        self._discovered_devices: dict[str, dict[str, Any]] = {}
+
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Handle the initial step."""
+        """Handle the initial mode selection step."""
+        if user_input is not None:
+            if user_input[CONF_MODE] == MODE_LOCAL:
+                return await self.async_step_local_discovery()
+            return await self.async_step_cloud()
+
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_MODE, default=MODE_LOCAL): vol.In(
+                    {
+                        MODE_LOCAL: "Contrôle Local LAN (Recommandé - 100% hors-ligne, sans Cloud)",
+                        MODE_CLOUD: "Mode Cloud Tuya Developer (iot.tuya.com)",
+                    }
+                ),
+            }
+        )
+        return self.async_show_form(step_id="user", data_schema=schema)
+
+    async def async_step_local_discovery(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Scan local network and configure a discovered Tuya device."""
+        errors: dict[str, str] = {}
+
+        if not self._discovered_devices:
+            self._discovered_devices = await async_discover_devices(timeout=3.0)
+
+        if user_input is not None:
+            dev_id = user_input[CONF_DEVICE_ID]
+            dev_info = self._discovered_devices.get(dev_id, {})
+            ip = dev_info.get("ip", user_input.get(CONF_IP_ADDRESS, ""))
+            version = dev_info.get("version", "3.3")
+            local_key = user_input[CONF_LOCAL_KEY].strip()
+            brand = user_input.get(CONF_BRAND, "thanks")
+            dev_name = user_input.get(CONF_DEVICE_NAME, f"Appareil {ip}")
+
+            # Verify local connectivity
+            test_dev = TuyaLocalDevice(device_id=dev_id, ip=ip, local_key=local_key, version=version)
+            try:
+                await test_dev.async_poll_status()
+            except Exception as err:
+                _LOGGER.warning("Could not poll device locally: %s", err)
+
+            unique_id = f"local_{dev_id}"
+            await self.async_set_unique_id(unique_id)
+            self._abort_if_unique_id_configured()
+
+            profile = OEM_PROFILES.get(brand, {})
+            brand_name = profile.get("name", brand.upper())
+            title = f"{dev_name} ({brand_name})"
+
+            config_data = {
+                CONF_MODE: MODE_LOCAL,
+                CONF_BRAND: brand,
+                CONF_DEVICE_ID: dev_id,
+                CONF_IP_ADDRESS: ip,
+                CONF_LOCAL_KEY: local_key,
+                CONF_PROTOCOL_VERSION: version,
+                CONF_DEVICE_NAME: dev_name,
+            }
+            return self.async_create_entry(title=title, data=config_data)
+
+        # Build dropdown options of discovered devices
+        dev_options = {
+            dev_id: f"{info['ip']} - ID: {dev_id} (Tuya v{info.get('version', '3.3')})"
+            for dev_id, info in self._discovered_devices.items()
+        }
+
+        # If none found, allow manual entry
+        if not dev_options:
+            dev_options["manual"] = "Saisie manuelle (aucun appareil détecté automatiquement)"
+
+        brand_options = {key: profile["name"] for key, profile in OEM_PROFILES.items()}
+
+        schema_fields: dict[Any, Any] = {
+            vol.Required(CONF_DEVICE_ID): vol.In(dev_options),
+            vol.Required(CONF_LOCAL_KEY): str,
+            vol.Required(CONF_DEVICE_NAME, default="Mon Appareil GiFi"): str,
+            vol.Required(CONF_BRAND, default="thanks"): vol.In(brand_options),
+        }
+
+        return self.async_show_form(
+            step_id="local_discovery",
+            data_schema=vol.Schema(schema_fields),
+            errors=errors,
+            description_placeholders={"count": str(len(self._discovered_devices))},
+        )
+
+    async def async_step_cloud(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Handle Cloud Tuya developer credentials."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -53,24 +153,21 @@ class TuyaOEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
 
             try:
-                # Test credentials by requesting a token directly from Tuya Cloud
                 await client.get_access_token()
-            except TuyaOEMAuthError as err:
-                _LOGGER.warning("Authentication failed: %s", err)
+            except TuyaOEMAuthError:
                 errors["base"] = "invalid_auth"
-            except TuyaOEMError as err:
-                _LOGGER.error("Cannot connect to Tuya Cloud: %s", err)
+            except TuyaOEMError:
                 errors["base"] = "cannot_connect"
             except Exception:
-                _LOGGER.exception("Unexpected error in Tuya OEM config flow")
                 errors["base"] = "unknown"
             else:
-                unique_id = f"{brand}_{client_id}"
+                unique_id = f"cloud_{brand}_{client_id}"
                 await self.async_set_unique_id(unique_id)
                 self._abort_if_unique_id_configured()
 
-                title = f"{profile['name']} ({client_id[:6]}...)"
+                title = f"{profile['name']} Cloud ({client_id[:6]}...)"
                 config_data = {
+                    CONF_MODE: MODE_CLOUD,
                     CONF_BRAND: brand,
                     CONF_CLIENT_ID: client_id,
                     CONF_SECRET: secret,
@@ -90,4 +187,4 @@ class TuyaOEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             }
         )
 
-        return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
+        return self.async_show_form(step_id="cloud", data_schema=schema, errors=errors)
