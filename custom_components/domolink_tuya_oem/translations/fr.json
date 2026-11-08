@@ -2,34 +2,23 @@
   "config": {
     "step": {
       "user": {
-        "title": "Connexion à un compte Tuya OEM",
-        "description": "Sélectionnez votre marque ou application mobile, puis renseignez vos identifiants de connexion.",
+        "title": "Connexion à votre compte Tuya OEM / Cloud",
+        "description": "Sélectionnez votre marque ou enseigne, puis renseignez vos clés de projet Tuya IoT Developer (disponibles gratuitement sur iot.tuya.com).",
         "data": {
-          "brand": "Marque / Application",
-          "username": "Email ou Identifiant mobile",
-          "password": "Mot de passe",
-          "country_code": "Indicatif pays (ex: 33 pour France)",
-          "endpoint": "Région Cloud Tuya"
-        }
-      },
-      "custom_oem": {
-        "title": "Configuration OEM Personnalisé / Tuya IoT",
-        "description": "Renseignez vos clés Cloud Tuya (Access ID / Access Secret) ou les clés de votre marque OEM.",
-        "data": {
+          "brand": "Marque / Application associée",
           "client_id": "Access ID / Client ID",
           "secret": "Access Secret / Client Secret",
-          "schema": "Schéma (ex: thanksapp, smartlife...)"
+          "endpoint": "Région Cloud Tuya"
         }
       }
     },
     "error": {
       "cannot_connect": "Échec de connexion au serveur Cloud Tuya. Vérifiez votre connexion Internet.",
-      "invalid_auth": "Identifiants invalides pour cette application. Vérifiez votre email et mot de passe.",
-      "tuya_sign_error": "Le serveur Cloud Tuya refuse les requêtes directes pour cette marque OEM (Erreur 1004: sign invalid). Voir les alternatives recommandées.",
+      "invalid_auth": "Access ID ou Access Secret invalide (Code 1004). Vérifiez vos clés sur iot.tuya.com.",
       "unknown": "Une erreur inattendue est survenue."
     },
     "abort": {
-      "already_configured": "Ce compte OEM Tuya est déjà configuré dans Home Assistant."
+      "already_configured": "Ce compte / projet Tuya est déjà configuré dans Home Assistant."
     }
   }
 }

@@ -13,24 +13,15 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .const import (
     CONF_BRAND,
     CONF_CLIENT_ID,
-    CONF_COUNTRY_CODE,
     CONF_ENDPOINT,
-    CONF_PASSWORD,
     CONF_SCHEMA,
     CONF_SECRET,
-    CONF_USERNAME,
-    DEFAULT_COUNTRY_CODE,
     DEFAULT_ENDPOINT,
     DOMAIN,
     ENDPOINTS,
     OEM_PROFILES,
 )
-from .tuya_api import (
-    TuyaOEMAuthError,
-    TuyaOEMClient,
-    TuyaOEMError,
-    TuyaOEMSignatureError,
-)
+from .tuya_api import TuyaOEMAuthError, TuyaOEMClient, TuyaOEMError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -40,10 +31,6 @@ class TuyaOEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
-    def __init__(self) -> None:
-        """Initialize flow."""
-        self._brand_data: dict[str, Any] = {}
-
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Handle the initial step."""
         errors: dict[str, str] = {}
@@ -51,45 +38,44 @@ class TuyaOEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             brand = user_input[CONF_BRAND]
             profile = OEM_PROFILES.get(brand, {})
-
-            if brand == "custom":
-                self._brand_data = user_input
-                return await self.async_step_custom_oem()
+            client_id = user_input[CONF_CLIENT_ID].strip()
+            secret = user_input[CONF_SECRET].strip()
+            endpoint = user_input.get(CONF_ENDPOINT, DEFAULT_ENDPOINT)
+            schema = profile.get("schema", "thanksapp")
 
             session = async_get_clientsession(self.hass)
             client = TuyaOEMClient(
-                endpoint=user_input.get(CONF_ENDPOINT, DEFAULT_ENDPOINT),
-                client_id=profile["client_id"],
-                secret=profile["secret"],
-                schema=profile["schema"],
-                username=user_input[CONF_USERNAME],
-                password=user_input[CONF_PASSWORD],
-                country_code=user_input.get(CONF_COUNTRY_CODE, DEFAULT_COUNTRY_CODE),
+                endpoint=endpoint,
+                client_id=client_id,
+                secret=secret,
+                schema=schema,
                 session=session,
             )
 
             try:
-                await client.login()
-            except TuyaOEMSignatureError:
-                errors["base"] = "tuya_sign_error"
-            except TuyaOEMAuthError:
+                # Test credentials by requesting a token directly from Tuya Cloud
+                await client.get_access_token()
+            except TuyaOEMAuthError as err:
+                _LOGGER.warning("Authentication failed: %s", err)
                 errors["base"] = "invalid_auth"
-            except TuyaOEMError:
+            except TuyaOEMError as err:
+                _LOGGER.error("Cannot connect to Tuya Cloud: %s", err)
                 errors["base"] = "cannot_connect"
             except Exception:
-                _LOGGER.exception("Unexpected exception during Tuya OEM login")
+                _LOGGER.exception("Unexpected error in Tuya OEM config flow")
                 errors["base"] = "unknown"
             else:
-                unique_id = f"{brand}_{user_input[CONF_USERNAME].lower()}"
+                unique_id = f"{brand}_{client_id}"
                 await self.async_set_unique_id(unique_id)
                 self._abort_if_unique_id_configured()
 
-                title = f"{profile['name']} ({user_input[CONF_USERNAME]})"
+                title = f"{profile['name']} ({client_id[:6]}...)"
                 config_data = {
-                    **user_input,
-                    CONF_SCHEMA: profile["schema"],
-                    CONF_CLIENT_ID: profile["client_id"],
-                    CONF_SECRET: profile["secret"],
+                    CONF_BRAND: brand,
+                    CONF_CLIENT_ID: client_id,
+                    CONF_SECRET: secret,
+                    CONF_ENDPOINT: endpoint,
+                    CONF_SCHEMA: schema,
                 }
                 return self.async_create_entry(title=title, data=config_data)
 
@@ -98,58 +84,10 @@ class TuyaOEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         schema = vol.Schema(
             {
                 vol.Required(CONF_BRAND, default="thanks"): vol.In(brand_options),
-                vol.Required(CONF_USERNAME): str,
-                vol.Required(CONF_PASSWORD): str,
-                vol.Optional(CONF_COUNTRY_CODE, default=DEFAULT_COUNTRY_CODE): str,
+                vol.Required(CONF_CLIENT_ID): str,
+                vol.Required(CONF_SECRET): str,
                 vol.Optional(CONF_ENDPOINT, default=DEFAULT_ENDPOINT): vol.In(ENDPOINTS.values()),
             }
         )
 
         return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
-
-    async def async_step_custom_oem(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Handle custom OEM keys entry."""
-        errors: dict[str, str] = {}
-
-        if user_input is not None:
-            combined_data = {**self._brand_data, **user_input}
-            session = async_get_clientsession(self.hass)
-            client = TuyaOEMClient(
-                endpoint=combined_data.get(CONF_ENDPOINT, DEFAULT_ENDPOINT),
-                client_id=user_input[CONF_CLIENT_ID],
-                secret=user_input[CONF_SECRET],
-                schema=user_input.get(CONF_SCHEMA, "smartlife"),
-                username=combined_data[CONF_USERNAME],
-                password=combined_data[CONF_PASSWORD],
-                country_code=combined_data.get(CONF_COUNTRY_CODE, DEFAULT_COUNTRY_CODE),
-                session=session,
-            )
-
-            try:
-                await client.login()
-            except TuyaOEMSignatureError:
-                errors["base"] = "tuya_sign_error"
-            except TuyaOEMAuthError:
-                errors["base"] = "invalid_auth"
-            except TuyaOEMError:
-                errors["base"] = "cannot_connect"
-            except Exception:
-                _LOGGER.exception("Unexpected exception during Custom OEM login")
-                errors["base"] = "unknown"
-            else:
-                unique_id = f"custom_{user_input[CONF_CLIENT_ID]}_{combined_data[CONF_USERNAME].lower()}"
-                await self.async_set_unique_id(unique_id)
-                self._abort_if_unique_id_configured()
-
-                title = f"OEM {user_input.get(CONF_SCHEMA, 'Custom')} ({combined_data[CONF_USERNAME]})"
-                return self.async_create_entry(title=title, data=combined_data)
-
-        schema = vol.Schema(
-            {
-                vol.Required(CONF_CLIENT_ID): str,
-                vol.Required(CONF_SECRET): str,
-                vol.Optional(CONF_SCHEMA, default="thanksapp"): str,
-            }
-        )
-
-        return self.async_show_form(step_id="custom_oem", data_schema=schema, errors=errors)

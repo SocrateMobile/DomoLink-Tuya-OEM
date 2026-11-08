@@ -11,12 +11,9 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .const import (
     CONF_BRAND,
     CONF_CLIENT_ID,
-    CONF_COUNTRY_CODE,
     CONF_ENDPOINT,
-    CONF_PASSWORD,
     CONF_SCHEMA,
     CONF_SECRET,
-    CONF_USERNAME,
     DOMAIN,
     OEM_PROFILES,
     PLATFORMS,
@@ -36,13 +33,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     profile = OEM_PROFILES.get(brand_key, {})
 
     brand_name = profile.get("name", brand_key.upper())
-    schema = data.get(CONF_SCHEMA) or profile.get("schema", "thanksapp")
-    client_id = data.get(CONF_CLIENT_ID) or profile.get("client_id")
-    secret = data.get(CONF_SECRET) or profile.get("secret")
-    endpoint = data.get(CONF_ENDPOINT) or profile.get("endpoint", "https://openapi.tuyaeu.com")
-    username = data[CONF_USERNAME]
-    password = data[CONF_PASSWORD]
-    country_code = data.get(CONF_COUNTRY_CODE, "33")
+    client_id = data[CONF_CLIENT_ID]
+    secret = data[CONF_SECRET]
+    endpoint = data.get(CONF_ENDPOINT, "https://openapi.tuyaeu.com")
+    schema = data.get(CONF_SCHEMA, profile.get("schema", "thanksapp"))
 
     session = async_get_clientsession(hass)
 
@@ -51,9 +45,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         client_id=client_id,
         secret=secret,
         schema=schema,
-        username=username,
-        password=password,
-        country_code=country_code,
         session=session,
     )
 
@@ -62,10 +53,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     try:
         await coordinator.async_config_entry_first_refresh()
     except TuyaOEMAuthError as err:
-        _LOGGER.error("Erreur d'authentification pour %s (%s): %s", brand_name, username, err)
+        _LOGGER.error("Erreur d'authentification pour %s (%s): %s", brand_name, client_id, err)
         return False
     except TuyaOEMError as err:
-        _LOGGER.warning("Impossible de joindre le Cloud Tuya pour %s (%s): %s", brand_name, username, err)
+        _LOGGER.warning("Impossible de joindre le Cloud Tuya pour %s (%s): %s", brand_name, client_id, err)
         raise ConfigEntryNotReady from err
 
     hass.data[DOMAIN][entry.entry_id] = {
