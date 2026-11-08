@@ -1,0 +1,34 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connexion à un compte Tuya OEM",
+        "description": "Sélectionnez votre marque ou application mobile, puis renseignez vos identifiants de connexion.",
+        "data": {
+          "brand": "Marque / Application",
+          "username": "Email ou Identifiant mobile",
+          "password": "Mot de passe",
+          "country_code": "Indicatif pays (ex: 33 pour France)",
+          "endpoint": "Région Cloud Tuya"
+        }
+      },
+      "custom_oem": {
+        "title": "Configuration OEM Personnalisé",
+        "description": "Renseignez les clés et le schéma de votre application Tuya en marque blanche.",
+        "data": {
+          "schema": "Schéma (ex: thanksapp, lidlhomesmart...)",
+          "client_id": "Client ID (App Key)",
+          "secret": "Secret (App Secret)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Échec de connexion au serveur Cloud Tuya. Vérifiez votre connexion Internet.",
+      "invalid_auth": "Identifiants invalides pour cette application. Vérifiez votre email et mot de passe.",
+      "unknown": "Une erreur inattendue est survenue."
+    },
+    "abort": {
+      "already_configured": "Ce compte OEM Tuya est déjà configuré dans Home Assistant."
+    }
+  }
+}

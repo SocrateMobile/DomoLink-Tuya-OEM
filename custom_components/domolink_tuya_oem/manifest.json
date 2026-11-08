@@ -1,0 +1,16 @@
+{
+  "domain": "domolink_tuya_oem",
+  "name": "DomoLink Tuya OEM Multi-Brand",
+  "codeowners": [
+    "@SocrateMobile",
+    "@jflavigne"
+  ],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/SocrateMobile/DomoLink-Tuya-OEM",
+  "integration_type": "hub",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/SocrateMobile/DomoLink-Tuya-OEM/issues",
+  "requirements": [],
+  "version": "1.0.0"
+}
