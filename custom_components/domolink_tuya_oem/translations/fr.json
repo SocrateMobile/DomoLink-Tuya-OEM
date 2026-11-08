@@ -13,18 +13,19 @@
         }
       },
       "custom_oem": {
-        "title": "Configuration OEM Personnalisé",
-        "description": "Renseignez les clés et le schéma de votre application Tuya en marque blanche.",
+        "title": "Configuration OEM Personnalisé / Tuya IoT",
+        "description": "Renseignez vos clés Cloud Tuya (Access ID / Access Secret) ou les clés de votre marque OEM.",
         "data": {
-          "schema": "Schéma (ex: thanksapp, lidlhomesmart...)",
-          "client_id": "Client ID (App Key)",
-          "secret": "Secret (App Secret)"
+          "client_id": "Access ID / Client ID",
+          "secret": "Access Secret / Client Secret",
+          "schema": "Schéma (ex: thanksapp, smartlife...)"
         }
       }
     },
     "error": {
       "cannot_connect": "Échec de connexion au serveur Cloud Tuya. Vérifiez votre connexion Internet.",
       "invalid_auth": "Identifiants invalides pour cette application. Vérifiez votre email et mot de passe.",
+      "tuya_sign_error": "Le serveur Cloud Tuya refuse les requêtes directes pour cette marque OEM (Erreur 1004: sign invalid). Voir les alternatives recommandées.",
       "unknown": "Une erreur inattendue est survenue."
     },
     "abort": {
