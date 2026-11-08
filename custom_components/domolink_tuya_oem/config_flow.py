@@ -7,7 +7,6 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
@@ -26,7 +25,12 @@ from .const import (
     ENDPOINTS,
     OEM_PROFILES,
 )
-from .tuya_api import TuyaOEMAuthError, TuyaOEMClient, TuyaOEMError
+from .tuya_api import (
+    TuyaOEMAuthError,
+    TuyaOEMClient,
+    TuyaOEMError,
+    TuyaOEMSignatureError,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -52,7 +56,6 @@ class TuyaOEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._brand_data = user_input
                 return await self.async_step_custom_oem()
 
-            # Prepare client to validate credentials
             session = async_get_clientsession(self.hass)
             client = TuyaOEMClient(
                 endpoint=user_input.get(CONF_ENDPOINT, DEFAULT_ENDPOINT),
@@ -67,11 +70,13 @@ class TuyaOEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             try:
                 await client.login()
+            except TuyaOEMSignatureError:
+                errors["base"] = "tuya_sign_error"
             except TuyaOEMAuthError:
                 errors["base"] = "invalid_auth"
             except TuyaOEMError:
                 errors["base"] = "cannot_connect"
-            except Exception:  # pylint: disable=broad-except
+            except Exception:
                 _LOGGER.exception("Unexpected exception during Tuya OEM login")
                 errors["base"] = "unknown"
             else:
@@ -88,7 +93,6 @@ class TuyaOEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 }
                 return self.async_create_entry(title=title, data=config_data)
 
-        # Brand choices for select dropdown
         brand_options = {key: profile["name"] for key, profile in OEM_PROFILES.items()}
 
         schema = vol.Schema(
@@ -114,7 +118,7 @@ class TuyaOEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 endpoint=combined_data.get(CONF_ENDPOINT, DEFAULT_ENDPOINT),
                 client_id=user_input[CONF_CLIENT_ID],
                 secret=user_input[CONF_SECRET],
-                schema=user_input[CONF_SCHEMA],
+                schema=user_input.get(CONF_SCHEMA, "smartlife"),
                 username=combined_data[CONF_USERNAME],
                 password=combined_data[CONF_PASSWORD],
                 country_code=combined_data.get(CONF_COUNTRY_CODE, DEFAULT_COUNTRY_CODE),
@@ -123,6 +127,8 @@ class TuyaOEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             try:
                 await client.login()
+            except TuyaOEMSignatureError:
+                errors["base"] = "tuya_sign_error"
             except TuyaOEMAuthError:
                 errors["base"] = "invalid_auth"
             except TuyaOEMError:
@@ -131,18 +137,18 @@ class TuyaOEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 _LOGGER.exception("Unexpected exception during Custom OEM login")
                 errors["base"] = "unknown"
             else:
-                unique_id = f"custom_{user_input[CONF_SCHEMA]}_{combined_data[CONF_USERNAME].lower()}"
+                unique_id = f"custom_{user_input[CONF_CLIENT_ID]}_{combined_data[CONF_USERNAME].lower()}"
                 await self.async_set_unique_id(unique_id)
                 self._abort_if_unique_id_configured()
 
-                title = f"OEM {user_input[CONF_SCHEMA]} ({combined_data[CONF_USERNAME]})"
+                title = f"OEM {user_input.get(CONF_SCHEMA, 'Custom')} ({combined_data[CONF_USERNAME]})"
                 return self.async_create_entry(title=title, data=combined_data)
 
         schema = vol.Schema(
             {
-                vol.Required(CONF_SCHEMA): str,
                 vol.Required(CONF_CLIENT_ID): str,
                 vol.Required(CONF_SECRET): str,
+                vol.Optional(CONF_SCHEMA, default="thanksapp"): str,
             }
         )
 
