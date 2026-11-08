@@ -9,8 +9,8 @@
   "dependencies": [],
   "documentation": "https://github.com/SocrateMobile/DomoLink-Tuya-OEM",
   "integration_type": "hub",
-  "iot_class": "cloud_polling",
+  "iot_class": "local_polling",
   "issue_tracker": "https://github.com/SocrateMobile/DomoLink-Tuya-OEM/issues",
   "requirements": [],
-  "version": "1.0.0"
+  "version": "1.2.1"
 }
