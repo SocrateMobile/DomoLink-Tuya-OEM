@@ -11,15 +11,23 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .const import (
     CONF_BRAND,
     CONF_CLIENT_ID,
+    CONF_DEVICE_ID,
+    CONF_DEVICE_NAME,
     CONF_ENDPOINT,
+    CONF_IP_ADDRESS,
+    CONF_LOCAL_KEY,
+    CONF_MODE,
+    CONF_PROTOCOL_VERSION,
     CONF_SCHEMA,
     CONF_SECRET,
     DOMAIN,
+    MODE_LOCAL,
     OEM_PROFILES,
     PLATFORMS,
 )
 from .coordinator import TuyaOEMDataCoordinator
 from .tuya_api import TuyaOEMAuthError, TuyaOEMClient, TuyaOEMError
+from .tuya_local import TuyaLocalDevice
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -29,17 +37,51 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
 
     data = entry.data
+    mode = data.get(CONF_MODE, MODE_LOCAL)
     brand_key = data.get(CONF_BRAND, "thanks")
     profile = OEM_PROFILES.get(brand_key, {})
-
     brand_name = profile.get("name", brand_key.upper())
+
+    # --- 1. LOCAL LAN SETUP ---
+    if mode == MODE_LOCAL:
+        dev_id = data[CONF_DEVICE_ID]
+        ip = data[CONF_IP_ADDRESS]
+        local_key = data[CONF_LOCAL_KEY]
+        version = data.get(CONF_PROTOCOL_VERSION, "3.3")
+        dev_name = data.get(CONF_DEVICE_NAME, f"{brand_name} ({ip})")
+
+        local_device = TuyaLocalDevice(
+            device_id=dev_id,
+            ip=ip,
+            local_key=local_key,
+            version=version,
+        )
+
+        coordinator = TuyaOEMDataCoordinator(
+            hass,
+            brand_name=brand_name,
+            local_device=local_device,
+            device_meta={"name": dev_name, "product_name": f"{brand_name} Local"},
+        )
+
+        await coordinator.async_config_entry_first_refresh()
+
+        hass.data[DOMAIN][entry.entry_id] = {
+            "coordinator": coordinator,
+            "brand_name": brand_name,
+            "mode": MODE_LOCAL,
+        }
+
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+        return True
+
+    # --- 2. CLOUD SETUP ---
     client_id = data[CONF_CLIENT_ID]
     secret = data[CONF_SECRET]
     endpoint = data.get(CONF_ENDPOINT, "https://openapi.tuyaeu.com")
     schema = data.get(CONF_SCHEMA, profile.get("schema", "thanksapp"))
 
     session = async_get_clientsession(hass)
-
     client = TuyaOEMClient(
         endpoint=endpoint,
         client_id=client_id,
@@ -48,7 +90,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         session=session,
     )
 
-    coordinator = TuyaOEMDataCoordinator(hass, client, brand_name)
+    coordinator = TuyaOEMDataCoordinator(
+        hass,
+        brand_name=brand_name,
+        client=client,
+    )
 
     try:
         await coordinator.async_config_entry_first_refresh()
@@ -63,6 +109,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "coordinator": coordinator,
         "client": client,
         "brand_name": brand_name,
+        "mode": "cloud",
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -74,7 +121,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         entry_data = hass.data[DOMAIN].pop(entry.entry_id, None)
-        if entry_data and "client" in entry_data:
+        if entry_data and "client" in entry_data and entry_data["client"]:
             await entry_data["client"].close()
 
     return unload_ok

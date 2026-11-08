@@ -2,8 +2,25 @@
   "config": {
     "step": {
       "user": {
-        "title": "Connexion à votre compte Tuya OEM / Cloud",
-        "description": "Sélectionnez votre marque ou enseigne, puis renseignez vos clés de projet Tuya IoT Developer (disponibles gratuitement sur iot.tuya.com).",
+        "title": "DomoLink Tuya OEM Multi-Brand",
+        "description": "Choisissez le mode de connexion souhaité pour vos appareils Tuya / OEM (Thank's GiFi, Lidl, Action, etc.).",
+        "data": {
+          "mode": "Mode d'intégration"
+        }
+      },
+      "local_discovery": {
+        "title": "Contrôle Local LAN (100% Hors-Ligne)",
+        "description": "{count} appareil(s) Tuya / OEM détecté(s) sur votre réseau Wi-Fi local. Sélectionnez votre appareil et renseignez sa clé locale (local_key à 16 caractères).",
+        "data": {
+          "device_id": "Appareil détecté sur le réseau local",
+          "local_key": "Clé locale (local_key - 16 caractères)",
+          "device_name": "Nom personnalisé de l'appareil",
+          "brand": "Marque / Application d'origine"
+        }
+      },
+      "cloud": {
+        "title": "Mode Cloud Tuya Developer (iot.tuya.com)",
+        "description": "Renseignez vos clés de projet Tuya IoT Developer.",
         "data": {
           "brand": "Marque / Application associée",
           "client_id": "Access ID / Client ID",
@@ -13,12 +30,12 @@
       }
     },
     "error": {
-      "cannot_connect": "Échec de connexion au serveur Cloud Tuya. Vérifiez votre connexion Internet.",
-      "invalid_auth": "Access ID ou Access Secret invalide (Code 1004). Vérifiez vos clés sur iot.tuya.com.",
+      "cannot_connect": "Échec de connexion réseau.",
+      "invalid_auth": "Identifiants invalides.",
       "unknown": "Une erreur inattendue est survenue."
     },
     "abort": {
-      "already_configured": "Ce compte / projet Tuya est déjà configuré dans Home Assistant."
+      "already_configured": "Cet appareil ou compte est déjà configuré dans Home Assistant."
     }
   }
 }

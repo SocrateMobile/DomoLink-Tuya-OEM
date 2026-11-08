@@ -10,14 +10,22 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .const import DEFAULT_SCAN_INTERVAL, DOMAIN
 from .tuya_api import TuyaOEMClient, TuyaOEMError
+from .tuya_local import TuyaLocalDevice
 
 _LOGGER = logging.getLogger(__name__)
 
 
 class TuyaOEMDataCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
-    """Coordinator to manage Tuya OEM device data updates."""
+    """Coordinator to manage Tuya OEM device data updates (Local or Cloud)."""
 
-    def __init__(self, hass: HomeAssistant, client: TuyaOEMClient, brand_name: str) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        brand_name: str,
+        client: TuyaOEMClient | None = None,
+        local_device: TuyaLocalDevice | None = None,
+        device_meta: dict[str, Any] | None = None,
+    ) -> None:
         """Initialize coordinator."""
         super().__init__(
             hass,
@@ -25,44 +33,76 @@ class TuyaOEMDataCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             name=f"{DOMAIN}_{brand_name}",
             update_interval=timedelta(seconds=DEFAULT_SCAN_INTERVAL),
         )
-        self.client = client
         self.brand_name = brand_name
+        self.client = client
+        self.local_device = local_device
+        self.device_meta = device_meta or {}
         self.devices: dict[str, dict[str, Any]] = {}
 
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
-        """Fetch latest device states from Tuya OEM cloud."""
-        try:
-            device_list = await self.client.get_devices()
-            devices_map: dict[str, dict[str, Any]] = {}
+        """Fetch latest device states (Local LAN or Cloud)."""
+        # --- 1. LOCAL LAN MODE ---
+        if self.local_device:
+            try:
+                dps = await self.local_device.async_poll_status()
+                dev_id = self.local_device.device_id
+                dev_data = {
+                    "id": dev_id,
+                    "name": self.device_meta.get("name", f"Appareil {dev_id[:6]}"),
+                    "category": self.device_meta.get("category", ""),
+                    "product_name": self.device_meta.get("product_name", f"{self.brand_name} (Local)"),
+                    "dps_status": dps,
+                }
+                self.devices = {dev_id: dev_data}
+                return self.devices
+            except Exception as err:
+                raise UpdateFailed(f"Erreur de communication locale LAN avec {self.local_device.ip}: {err}") from err
 
-            for dev in device_list:
-                dev_id = dev.get("id") or dev.get("devId") or dev.get("device_id")
-                if not dev_id:
-                    continue
+        # --- 2. CLOUD MODE ---
+        if self.client:
+            try:
+                device_list = await self.client.get_devices()
+                devices_map: dict[str, dict[str, Any]] = {}
 
-                # Fetch updated status if available
-                status_list = await self.client.get_device_status(dev_id)
-                # Convert list of {"code": "...", "value": ...} to a dict for easy entity lookups
-                status_dict: dict[str, Any] = {}
-                for item in status_list:
-                    if isinstance(item, dict) and "code" in item:
-                        status_dict[item["code"]] = item.get("value")
+                for dev in device_list:
+                    dev_id = dev.get("id") or dev.get("devId") or dev.get("device_id")
+                    if not dev_id:
+                        continue
 
-                dev["dps_status"] = status_dict
-                devices_map[dev_id] = dev
+                    status_list = await self.client.get_device_status(dev_id)
+                    status_dict: dict[str, Any] = {}
+                    for item in status_list:
+                        if isinstance(item, dict) and "code" in item:
+                            status_dict[item["code"]] = item.get("value")
 
-            self.devices = devices_map
-            return devices_map
-        except TuyaOEMError as err:
-            raise UpdateFailed(f"Erreur de communication avec le Cloud Tuya {self.brand_name}: {err}") from err
+                    dev["dps_status"] = status_dict
+                    devices_map[dev_id] = dev
+
+                self.devices = devices_map
+                return devices_map
+            except TuyaOEMError as err:
+                raise UpdateFailed(f"Erreur de communication avec le Cloud Tuya {self.brand_name}: {err}") from err
+
+        return {}
 
     async def async_send_command(self, device_id: str, commands: list[dict[str, Any]]) -> bool:
-        """Send command and update local cached state optimistically."""
-        success = await self.client.send_command(device_id, commands)
-        if success and device_id in self.data:
-            # Optimistic update
-            dps = self.data[device_id].setdefault("dps_status", {})
-            for cmd in commands:
-                dps[cmd["code"]] = cmd["value"]
-            self.async_set_updated_data(self.data)
-        return success
+        """Send command (Local LAN or Cloud)."""
+        if self.local_device:
+            success = await self.local_device.async_send_command(commands)
+            if success and device_id in self.data:
+                dps = self.data[device_id].setdefault("dps_status", {})
+                for cmd in commands:
+                    dps[str(cmd["code"])] = cmd["value"]
+                self.async_set_updated_data(self.data)
+            return success
+
+        if self.client:
+            success = await self.client.send_command(device_id, commands)
+            if success and device_id in self.data:
+                dps = self.data[device_id].setdefault("dps_status", {})
+                for cmd in commands:
+                    dps[cmd["code"]] = cmd["value"]
+                self.async_set_updated_data(self.data)
+            return success
+
+        return False

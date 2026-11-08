@@ -3,16 +3,23 @@ from __future__ import annotations
 
 DOMAIN = "domolink_tuya_oem"
 
+CONF_MODE = "mode"
+MODE_LOCAL = "local"
+MODE_CLOUD = "cloud"
+
 CONF_BRAND = "brand"
 CONF_SCHEMA = "schema"
 CONF_CLIENT_ID = "client_id"
 CONF_SECRET = "secret"
 CONF_ENDPOINT = "endpoint"
-CONF_USERNAME = "username"
-CONF_PASSWORD = "password"
-CONF_COUNTRY_CODE = "country_code"
 
-DEFAULT_COUNTRY_CODE = "33"
+# Local parameters
+CONF_LOCAL_KEY = "local_key"
+CONF_DEVICE_ID = "device_id"
+CONF_IP_ADDRESS = "ip_address"
+CONF_PROTOCOL_VERSION = "protocol_version"
+CONF_DEVICE_NAME = "device_name"
+
 DEFAULT_SCAN_INTERVAL = 30  # seconds
 
 ENDPOINTS = {

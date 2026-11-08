@@ -2,8 +2,25 @@
   "config": {
     "step": {
       "user": {
-        "title": "Connect to your Tuya OEM / Cloud Account",
-        "description": "Select your brand, then enter your Tuya IoT Developer project keys (free from iot.tuya.com).",
+        "title": "DomoLink Tuya OEM Multi-Brand",
+        "description": "Choose the connection mode for your Tuya / OEM devices (Thank's GiFi, Lidl, Action, etc.).",
+        "data": {
+          "mode": "Integration Mode"
+        }
+      },
+      "local_discovery": {
+        "title": "Local LAN Control (100% Offline)",
+        "description": "{count} Tuya / OEM device(s) discovered on your local network. Select your device and enter its 16-character local_key.",
+        "data": {
+          "device_id": "Discovered Device on Local Network",
+          "local_key": "Local Key (16 characters)",
+          "device_name": "Custom Device Name",
+          "brand": "Brand / Original App"
+        }
+      },
+      "cloud": {
+        "title": "Cloud Mode (Tuya Developer Platform)",
+        "description": "Enter your Tuya IoT Developer project keys.",
         "data": {
           "brand": "Brand / Associated App",
           "client_id": "Access ID / Client ID",
@@ -13,12 +30,12 @@
       }
     },
     "error": {
-      "cannot_connect": "Failed to connect to Tuya Cloud server. Check your Internet connection.",
-      "invalid_auth": "Invalid Access ID or Access Secret (Code 1004). Please verify your keys on iot.tuya.com.",
+      "cannot_connect": "Network connection error.",
+      "invalid_auth": "Invalid credentials.",
       "unknown": "An unexpected error occurred."
     },
     "abort": {
-      "already_configured": "This Tuya account / project is already configured in Home Assistant."
+      "already_configured": "This device or account is already configured in Home Assistant."
     }
   }
 }
