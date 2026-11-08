@@ -1,0 +1,34 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to a Tuya OEM Account",
+        "description": "Select your brand or mobile app, then enter your login credentials.",
+        "data": {
+          "brand": "Brand / Application",
+          "username": "Email or Mobile ID",
+          "password": "Password",
+          "country_code": "Country Code (e.g. 33 for France)",
+          "endpoint": "Tuya Cloud Region"
+        }
+      },
+      "custom_oem": {
+        "title": "Custom OEM Configuration",
+        "description": "Enter the keys and schema of your custom Tuya white-label app.",
+        "data": {
+          "schema": "Schema (e.g. thanksapp, lidlhomesmart...)",
+          "client_id": "Client ID (App Key)",
+          "secret": "Secret (App Secret)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to Tuya Cloud server. Check your Internet connection.",
+      "invalid_auth": "Invalid credentials for this application. Please check your email and password.",
+      "unknown": "An unexpected error occurred."
+    },
+    "abort": {
+      "already_configured": "This Tuya OEM account is already configured in Home Assistant."
+    }
+  }
+}
