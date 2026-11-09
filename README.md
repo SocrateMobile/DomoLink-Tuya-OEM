@@ -1,7 +1,9 @@
 # DomoLink Tuya OEM Multi-Brand for Home Assistant
- 
- // Arrêté pour le moment //
- 
+
+[![Documentation Officielle](https://img.shields.io/badge/Documentation-socratemobile.fr-06b6d4.svg?logo=googlechrome&logoColor=white)](https://socratemobile.fr/integration.html?id=domolink-tuya-oem)
+
+> 🌐 **Site officiel & Documentation complète** : Retrouvez le guide d'installation pas à pas, les entités supportées et les exemples d'automatisations sur [socratemobile.fr](https://socratemobile.fr/integration.html?id=domolink-tuya-oem).
+
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
 [![Home Assistant](https://img.shields.io/badge/Home--Assistant-2024.1%2B-blue.svg)](https://www.home-assistant.io/)
 
