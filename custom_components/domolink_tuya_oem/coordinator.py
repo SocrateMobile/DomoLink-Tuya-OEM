@@ -70,17 +70,23 @@ class TuyaOEMDataCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         if overrides.get("linked_camera_entity"):
             return overrides["linked_camera_entity"]
 
+        import unicodedata
+        def _clean(s: str) -> str:
+            s = unicodedata.normalize("NFD", s)
+            s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+            return re.sub(r"[^a-z0-9]+", "_", s.lower()).strip("_")
+
         camera_entities = self.hass.states.async_entity_ids("camera")
-        norm_name = re.sub(r"[^a-z0-9]+", "_", dev_name.lower()).strip("_")
+        norm_name = _clean(dev_name)
         norm_tokens = set(norm_name.split("_")) - {"camera", "cam", "oem", "tuya"}
 
         for ent_id in camera_entities:
             # Skip domolink_tuya_oem own entities to avoid loop
             if ent_id.startswith(f"camera.{DOMAIN}") or ent_id.endswith(f"_{device_id}_camera") or ent_id == f"camera.{device_id}_camera":
                 continue
-            ent_part = ent_id.replace("camera.", "").lower()
-            ent_tokens = set(re.sub(r"[^a-z0-9]+", "_", ent_part).split("_")) - {"camera", "cam"}
-            if norm_tokens and norm_tokens.issubset(ent_tokens):
+            ent_part = _clean(ent_id.replace("camera.", ""))
+            ent_tokens = set(ent_part.split("_")) - {"camera", "cam", "tuya"}
+            if norm_tokens and (norm_tokens.issubset(ent_tokens) or ent_tokens.issubset(norm_tokens) or len(norm_tokens & ent_tokens) >= 2):
                 return ent_id
 
         return None
@@ -135,6 +141,14 @@ class TuyaOEMDataCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         if self.mobile_client:
             try:
                 device_list = await self.mobile_client.get_devices()
+                if not device_list and self.devices:
+                    _LOGGER.warning(
+                        "La découverte mobile a retourné 0 appareils pour %s alors que %d étaient actifs. Conservation des appareils existants.",
+                        self.brand_name,
+                        len(self.devices),
+                    )
+                    return self.devices
+
                 devices_map: dict[str, dict[str, Any]] = {}
 
                 for dev in device_list:

@@ -37,7 +37,7 @@ is_private_lan_ip = tuya_api.is_private_lan_ip
 
 
 def test_manifest_structure_and_version():
-    """Verify manifest.json has valid domain, codeowners, and version 2.0.1."""
+    """Verify manifest.json has valid domain, codeowners, and version 2.0.2."""
     manifest_path = os.path.join(COMPONENT_DIR, "manifest.json")
     assert os.path.isfile(manifest_path)
     with open(manifest_path, "r", encoding="utf-8") as f:
@@ -45,7 +45,7 @@ def test_manifest_structure_and_version():
 
     assert manifest["domain"] == "domolink_tuya_oem"
     assert manifest["name"] == "DomoLink Tuya OEM Multi-Brand"
-    assert manifest["version"] == "2.0.1"
+    assert manifest["version"] == "2.0.2"
     assert "@SocrateMobile" in manifest["codeowners"]
     assert "tuya-mobile>=1.2.0" in manifest["requirements"]
 
@@ -232,3 +232,42 @@ def test_send_command_device_offline_handling():
         assert success is False
 
     asyncio.run(_test())
+
+
+def test_camera_entity_accent_matching():
+    """Verify accent stripping and token matching for French camera names."""
+    import re
+    import unicodedata
+
+    def _clean(s: str) -> str:
+        s = unicodedata.normalize("NFD", s)
+        s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+        return re.sub(r"[^a-z0-9]+", "_", s.lower()).strip("_")
+
+    def match(dev_name, ha_entities):
+        norm_name = _clean(dev_name)
+        norm_tokens = set(norm_name.split("_")) - {"camera", "cam", "oem", "tuya"}
+        for ent_id in ha_entities:
+            ent_part = _clean(ent_id.replace("camera.", ""))
+            ent_tokens = set(ent_part.split("_")) - {"camera", "cam", "tuya"}
+            if norm_tokens and (norm_tokens.issubset(ent_tokens) or ent_tokens.issubset(norm_tokens) or len(norm_tokens & ent_tokens) >= 2):
+                return ent_id
+        return None
+
+    ha_cams = [
+        "camera.camera_exterieur_piscine",
+        "camera.solar_wall_light_camera",
+        "camera.entree_rochegude",
+        "camera.camera_rochegude_chambre",
+        "camera.camera_rochegude_salon",
+        "camera.lampe_d_exterieur_intelligente_avec_camera",
+        "camera.camera_rochegude_cuisine",
+    ]
+
+    assert match("Caméra extérieur Piscine", ha_cams) == "camera.camera_exterieur_piscine"
+    assert match("Solar Wall Light Camera", ha_cams) == "camera.solar_wall_light_camera"
+    assert match("Caméra Entrée Rochegude", ha_cams) == "camera.entree_rochegude"
+    assert match("Caméra Rochegude Chambre", ha_cams) == "camera.camera_rochegude_chambre"
+    assert match("Caméra Rochegude Salon", ha_cams) == "camera.camera_rochegude_salon"
+    assert match("Lampe d'extérieur intelligente avec caméra", ha_cams) == "camera.lampe_d_exterieur_intelligente_avec_camera"
+    assert match("Caméra Rochegude cuisine", ha_cams) == "camera.camera_rochegude_cuisine"

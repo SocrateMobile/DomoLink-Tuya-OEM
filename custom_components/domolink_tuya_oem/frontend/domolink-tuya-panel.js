@@ -1043,10 +1043,12 @@ class DomolinkTuyaPanel extends HTMLElement {
     if (dev.device_type === "camera") {
       const isPrivate = Boolean(dps["105"] || dps["basic_private"]);
       const motionActive = Boolean(dps["134"] || dps["motion_switch"]);
+      const targetEntity = dev.linked_camera_entity_id || dev.camera_entity_id;
+      const previewSrc = targetEntity ? `/api/camera_proxy/${targetEntity}?t=${Date.now()}` : (dev.icon_url || "");
 
       return `
         <div class="camera-preview-box">
-          <img src="${dev.icon_url || ""}" class="camera-img" alt="Aperçu caméra" />
+          <img src="${previewSrc}" class="camera-img" alt="${this._escapeHtml(dev.name)}" onerror="this.onerror=null;this.src='${dev.icon_url || ''}';" />
           <button class="live-stream-btn" data-live-cam="${dev.id}">▶ FLUX DIRECT</button>
         </div>
         <div class="control-row">

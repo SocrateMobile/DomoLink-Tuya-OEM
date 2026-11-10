@@ -37,8 +37,6 @@ async def async_setup_entry(
 class TuyaOEMCamera(CoordinatorEntity[TuyaOEMDataCoordinator], Camera):
     """Representation of a Tuya OEM Camera."""
 
-    _attr_supported_features = CameraEntityFeature.STREAM
-
     def __init__(
         self,
         coordinator: TuyaOEMDataCoordinator,
@@ -65,8 +63,27 @@ class TuyaOEMCamera(CoordinatorEntity[TuyaOEMDataCoordinator], Camera):
         )
 
     @property
+    def supported_features(self) -> CameraEntityFeature:
+        """Return supported features dynamically."""
+        dev = self.coordinator.data.get(self.device_id, {})
+        overrides = self.coordinator.overrides.get(self.device_id, {})
+        if overrides.get("rtsp_url") or dev.get("rtsp_url"):
+            return CameraEntityFeature.STREAM
+        linked = self.coordinator.find_linked_camera_entity(self.device_id, self._attr_name)
+        if linked:
+            return CameraEntityFeature.STREAM
+        if self._cached_stream_url:
+            return CameraEntityFeature.STREAM
+        return CameraEntityFeature(0)
+
+    @property
     def available(self) -> bool:
         """Return True if camera is online."""
+        linked = self.coordinator.find_linked_camera_entity(self.device_id, self._attr_name)
+        if linked and self.hass:
+            st = self.hass.states.get(linked)
+            if st and st.state != "unavailable":
+                return True
         dev = self.coordinator.data.get(self.device_id, {})
         return bool(dev.get("online", True))
 
