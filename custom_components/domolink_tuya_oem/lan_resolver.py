@@ -157,12 +157,24 @@ class LanResolver:
                 method,
                 version,
             )
-            self.coordinator.local_devices[dev_id] = TuyaLocalDevice(
+            if current_local:
+                try:
+                    current_local.close()
+                except Exception:
+                    pass
+
+            new_local = TuyaLocalDevice(
                 device_id=dev_id,
                 ip=ip,
                 local_key=local_key,
                 version=version,
             )
+            self.coordinator.local_devices[dev_id] = new_local
+            if self.hass:
+                new_local.start_push_listener(
+                    self.hass.loop,
+                    lambda dps, d_id=dev_id: self.coordinator._handle_local_device_push(d_id, dps),
+                )
             self._resolution_methods[dev_id] = method
             self._last_verified[dev_id] = time.time()
             self._failed_attempts[dev_id] = 0

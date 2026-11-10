@@ -75,7 +75,7 @@ is_private_lan_ip = tuya_api.is_private_lan_ip
 
 
 def test_manifest_structure_and_version():
-    """Verify manifest.json has valid domain, codeowners, and version 2.1.0."""
+    """Verify manifest.json has valid domain, codeowners, and version 2.2.0."""
     manifest_path = os.path.join(COMPONENT_DIR, "manifest.json")
     assert os.path.isfile(manifest_path)
     with open(manifest_path, "r", encoding="utf-8") as f:
@@ -83,9 +83,10 @@ def test_manifest_structure_and_version():
 
     assert manifest["domain"] == "domolink_tuya_oem"
     assert manifest["name"] == "DomoLink Tuya OEM Multi-Brand"
-    assert manifest["version"] == "2.1.0"
+    assert manifest["version"] == "2.2.0"
     assert "@SocrateMobile" in manifest["codeowners"]
     assert "tuya-mobile>=1.2.0" in manifest["requirements"]
+    assert any("tinytuya" in req for req in manifest["requirements"])
     assert "dhcp" in manifest and len(manifest["dhcp"]) > 0
 
 
@@ -512,7 +513,34 @@ def test_platforms_include_number_and_select():
     const_spec.loader.exec_module(const)
     assert "number" in const.PLATFORMS
     assert "select" in const.PLATFORMS
-    assert const.VERSION == "2.1.0"
+    assert const.VERSION == "2.2.0"
+
+
+def test_tinytuya_local_device_integration():
+    """Verify TuyaLocalDevice instantiates tinytuya Device for protocol 3.4/3.5 support."""
+    dev_34 = tuya_local.TuyaLocalDevice(
+        device_id="bf_v34_device",
+        ip="192.168.1.150",
+        local_key="abcdef0123456789",
+        version="3.4",
+    )
+    assert dev_34._tt_dev is not None
+    assert dev_34._tt_dev.id == "bf_v34_device"
+    assert dev_34._tt_dev.version == 3.4
+
+    dev_35 = tuya_local.TuyaLocalDevice(
+        device_id="bf_v35_device",
+        ip="192.168.1.151",
+        local_key="abcdef0123456789",
+        version="3.5",
+    )
+    assert dev_35._tt_dev is not None
+    assert dev_35._tt_dev.version == 3.5
+
+    # Push listener lifecycle
+    dev_34.close()
+    assert dev_34._push_running is False
+
 
 
 
