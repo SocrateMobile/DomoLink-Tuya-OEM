@@ -67,7 +67,9 @@ async def _async_register_frontend_panel(hass: HomeAssistant) -> None:
         )
 
     try:
-        frontend.async_remove_panel(hass, PANEL_URL)
+        panels = hass.data.get("frontend_panels")
+        if isinstance(panels, dict) and PANEL_URL in panels:
+            frontend.async_remove_panel(hass, PANEL_URL)
     except Exception:
         pass
 
