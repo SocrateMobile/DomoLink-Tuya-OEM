@@ -42,6 +42,8 @@ async def async_setup_entry(
 class TuyaOEMClimate(CoordinatorEntity[TuyaOEMDataCoordinator], ClimateEntity):
     """Representation of a Tuya OEM Thermostat."""
 
+    _enable_turn_on_off_backwards_compatibility = False
+
     def __init__(
         self,
         coordinator: TuyaOEMDataCoordinator,
@@ -72,6 +74,31 @@ class TuyaOEMClimate(CoordinatorEntity[TuyaOEMDataCoordinator], ClimateEntity):
             manufacturer=f"Tuya ({brand_name})",
             model=dev.get("product_name") or dev.get("model") or "Tuya OEM Thermostat",
         )
+        self._update_state_from_coordinator()
+
+    def _update_state_from_coordinator(self) -> None:
+        """Update internal attributes from coordinator data."""
+        dev = self.coordinator.data.get(self.device_id, {})
+        dps = dev.get("dps_status", {})
+        val_cur = dps.get("temp_current")
+        if val_cur is not None:
+            self._attr_current_temperature = val_cur / 10.0 if val_cur > 100 else float(val_cur)
+        else:
+            self._attr_current_temperature = None
+
+        val_tgt = dps.get("temp_set")
+        if val_tgt is not None:
+            self._attr_target_temperature = val_tgt / 10.0 if val_tgt > 100 else float(val_tgt)
+        else:
+            self._attr_target_temperature = None
+
+        is_on = dps.get("switch", True)
+        self._attr_hvac_mode = HVACMode.HEAT if is_on else HVACMode.OFF
+
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from the coordinator."""
+        self._update_state_from_coordinator()
+        self.async_write_ha_state()
 
     @property
     def available(self) -> bool:
@@ -84,32 +111,6 @@ class TuyaOEMClimate(CoordinatorEntity[TuyaOEMDataCoordinator], ClimateEntity):
         """Return product photo from Tuya."""
         dev = self.coordinator.data.get(self.device_id, {})
         return dev.get("icon_url") or None
-
-    @property
-    def current_temperature(self) -> float | None:
-        """Return current temperature."""
-        dps = self.coordinator.data.get(self.device_id, {}).get("dps_status", {})
-        val = dps.get("temp_current")
-        if val is not None:
-            # Tuya temperature can be tenths of degree
-            return val / 10.0 if val > 100 else float(val)
-        return None
-
-    @property
-    def target_temperature(self) -> float | None:
-        """Return target temperature."""
-        dps = self.coordinator.data.get(self.device_id, {}).get("dps_status", {})
-        val = dps.get("temp_set")
-        if val is not None:
-            return val / 10.0 if val > 100 else float(val)
-        return None
-
-    @property
-    def hvac_mode(self) -> HVACMode:
-        """Return hvac mode."""
-        dps = self.coordinator.data.get(self.device_id, {}).get("dps_status", {})
-        is_on = dps.get("switch", True)
-        return HVACMode.HEAT if is_on else HVACMode.OFF
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
         """Set target temperature."""

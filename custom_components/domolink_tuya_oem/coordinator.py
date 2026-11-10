@@ -1,8 +1,10 @@
 """DataUpdateCoordinator for DomoLink Tuya OEM."""
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
 import logging
+import re
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -11,7 +13,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .const import DEFAULT_SCAN_INTERVAL, DOMAIN
 from .dp_registry import parse_device_capabilities
-from .tuya_api import TuyaOEMClient, TuyaOEMError, TuyaOEMMobileClient
+from .tuya_api import TuyaOEMClient, TuyaOEMError, TuyaOEMMobileClient, is_private_lan_ip
 from .tuya_local import TuyaLocalDevice
 
 _LOGGER = logging.getLogger(__name__)
@@ -60,14 +62,41 @@ class TuyaOEMDataCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 self.overrides = loaded
             self._overrides_loaded = True
 
+    def find_linked_camera_entity(self, device_id: str, dev_name: str) -> str | None:
+        """Find an existing functional camera entity in HA matching this Tuya camera."""
+        if not self.hass:
+            return None
+        overrides = self.overrides.get(device_id, {})
+        if overrides.get("linked_camera_entity"):
+            return overrides["linked_camera_entity"]
+
+        camera_entities = self.hass.states.async_entity_ids("camera")
+        norm_name = re.sub(r"[^a-z0-9]+", "_", dev_name.lower()).strip("_")
+        norm_tokens = set(norm_name.split("_")) - {"camera", "cam", "oem", "tuya"}
+
+        for ent_id in camera_entities:
+            # Skip domolink_tuya_oem own entities to avoid loop
+            if ent_id.startswith(f"camera.{DOMAIN}") or ent_id.endswith(f"_{device_id}_camera") or ent_id == f"camera.{device_id}_camera":
+                continue
+            ent_part = ent_id.replace("camera.", "").lower()
+            ent_tokens = set(re.sub(r"[^a-z0-9]+", "_", ent_part).split("_")) - {"camera", "cam"}
+            if norm_tokens and norm_tokens.issubset(ent_tokens):
+                return ent_id
+
+        return None
+
     async def async_save_device_override(self, device_id: str, new_overrides: dict[str, Any]) -> None:
-        """Save user customization (renaming, forced type, manual IP) to persistent store."""
+        """Save user customization (renaming, forced type, manual IP, RTSP URL) to persistent store."""
         await self._async_ensure_overrides()
         current = self.overrides.setdefault(device_id, {})
         current.update(new_overrides)
         await self._store.async_save(self.overrides)
         # Apply immediately
         if device_id in self.data:
+            if "ip" in new_overrides:
+                self.data[device_id]["ip"] = new_overrides["ip"]
+            if "rtsp_url" in new_overrides:
+                self.data[device_id]["rtsp_url"] = new_overrides["rtsp_url"]
             caps = parse_device_capabilities(self.data[device_id], self.overrides)
             self.data[device_id]["caps"] = caps
             self.data[device_id]["name"] = caps["name"]
@@ -113,15 +142,17 @@ class TuyaOEMDataCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                     if not dev_id:
                         continue
 
-                    # Check for override IP
+                    # Check for override IP and RTSP URL
                     dev_overrides = self.overrides.get(dev_id, {})
                     if dev_overrides.get("ip"):
                         dev["ip"] = dev_overrides["ip"]
+                    if dev_overrides.get("rtsp_url"):
+                        dev["rtsp_url"] = dev_overrides["rtsp_url"]
 
-                    # Register or update local device if local_key and IP are available
+                    # Register or update local device ONLY if valid private LAN IP and local_key
                     local_key = dev.get("local_key")
                     ip = dev.get("ip")
-                    if local_key and ip and dev_id not in self.local_devices:
+                    if local_key and ip and is_private_lan_ip(ip) and dev_id not in self.local_devices:
                         try:
                             self.local_devices[dev_id] = TuyaLocalDevice(
                                 device_id=dev_id,
@@ -131,25 +162,21 @@ class TuyaOEMDataCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                         except Exception as e:
                             _LOGGER.debug("Could not init local client for %s: %s", dev_id, e)
 
-                    # Poll status: prioritize fast local LAN poll, fallback to mobile cloud
-                    status_dict: dict[str, Any] = {}
+                    # Poll status: use fresh dps from get_devices(), optionally refresh via LAN
+                    status_dict: dict[str, Any] = dict(dev.get("dps") or {})
                     polled_locally = False
 
                     if dev_id in self.local_devices:
                         try:
-                            status_dict = await self.local_devices[dev_id].async_poll_status()
-                            polled_locally = True
+                            local_status = await asyncio.wait_for(
+                                self.local_devices[dev_id].async_poll_status(),
+                                timeout=1.2,
+                            )
+                            if local_status:
+                                status_dict.update(local_status)
+                                polled_locally = True
                         except Exception as local_err:
-                            _LOGGER.debug("Local poll for %s failed (%s), fallback to mobile cloud", dev_id, local_err)
-
-                    if not polled_locally:
-                        try:
-                            status_dict = await self.mobile_client.get_device_status(dev_id)
-                        except Exception as cloud_err:
-                            _LOGGER.debug("Mobile cloud status for %s failed: %s", dev_id, cloud_err)
-
-                    if not status_dict and dev.get("dps"):
-                        status_dict = dev["dps"]
+                            _LOGGER.debug("Local poll for %s failed (%s), using mobile state", dev_id, local_err)
 
                     dev["dps_status"] = status_dict
                     dev["lan_active"] = polled_locally
@@ -250,18 +277,36 @@ class TuyaOEMDataCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
     async def async_get_camera_stream(self, device_id: str) -> str | None:
         """Get live RTSP/HLS URL for a camera."""
+        dev = self.data.get(device_id, {})
+        overrides = self.overrides.get(device_id, {})
+
+        # 1. User manual RTSP URL override
+        custom_rtsp = overrides.get("rtsp_url") or dev.get("rtsp_url")
+        if custom_rtsp and isinstance(custom_rtsp, str) and any(custom_rtsp.startswith(p) for p in ("rtsp://", "http://", "https://")):
+            return custom_rtsp.strip()
+
+        # 2. Check if a linked HA camera entity exists (from Tuya or DomoLink Camera)
+        linked_cam = self.find_linked_camera_entity(device_id, dev.get("name", ""))
+        if linked_cam and self.hass:
+            try:
+                from homeassistant.components.camera import async_request_stream
+                stream_url = await async_request_stream(self.hass, linked_cam, fmt="hls")
+                if stream_url:
+                    return stream_url
+            except Exception as e:
+                _LOGGER.debug("Could not get stream from linked camera %s: %s", linked_cam, e)
+
+        # 3. Mobile Client IPC endpoints
         if self.mobile_client:
             url = await self.mobile_client.get_camera_stream_url(device_id)
             if url:
                 return url
+
+        # 4. Developer Cloud endpoints
         if self.client:
             url = await self.client.get_camera_stream_url(device_id)
             if url:
                 return url
-        # Fallback local RTSP if IP and local key are present
-        dev = self.data.get(device_id, {})
-        ip = dev.get("ip")
-        key = dev.get("local_key")
-        if ip and key:
-            return f"rtsp://admin:{key}@{ip}:554/live/ch0"
+
+        # Never generate fake RTSP URLs with raw local_keys that fail URL parsing and 404
         return None

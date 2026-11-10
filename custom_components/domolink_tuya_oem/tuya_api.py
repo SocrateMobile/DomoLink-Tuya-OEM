@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import ipaddress
 import json
 import logging
 import time
@@ -12,6 +13,23 @@ from typing import Any
 import aiohttp
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def is_private_lan_ip(ip_str: str | None) -> bool:
+    """Return True only if ip_str is a valid private IPv4 LAN address (10.x, 172.16-31.x, 192.168.x)."""
+    if not ip_str or not isinstance(ip_str, str):
+        return False
+    try:
+        ip_obj = ipaddress.ip_address(ip_str.strip())
+        return (
+            ip_obj.version == 4
+            and ip_obj.is_private
+            and not ip_obj.is_loopback
+            and not ip_obj.is_unspecified
+            and not ip_obj.is_link_local
+        )
+    except ValueError:
+        return False
 
 
 class TuyaOEMError(Exception):
@@ -449,12 +467,28 @@ class TuyaOEMMobileClient:
                                         icon_url = obj.get("iconUrl") or obj.get("icon") or p_bean.get("iconUrl") or p_bean.get("icon") or ""
                                         dp_names = obj.get("dpName") or obj.get("dpsName") or {}
                                         schema_info = obj.get("schemaInfo") or p_bean.get("schemaInfo") or obj.get("schema")
+                                        
+                                        # Strict separation between private LAN IP and public WAN IP
+                                        raw_lan = obj.get("lanIp") or obj.get("localIp")
+                                        raw_wan = obj.get("ip")
+                                        clean_lan = None
+                                        clean_wan = None
+
+                                        if is_private_lan_ip(raw_lan):
+                                            clean_lan = raw_lan
+                                        elif is_private_lan_ip(raw_wan):
+                                            clean_lan = raw_wan
+
+                                        if raw_wan and not is_private_lan_ip(raw_wan):
+                                            clean_wan = raw_wan
+
                                         discovered[dev_id] = {
                                             "id": dev_id,
                                             "devId": dev_id,
                                             "name": obj.get("name") or obj.get("customName") or obj.get("devName") or f"Appareil {dev_id[:6]}",
                                             "local_key": obj.get("localKey") or obj.get("local_key") or obj.get("secKey"),
-                                            "ip": obj.get("ip") or obj.get("lanIp"),
+                                            "ip": clean_lan,
+                                            "wan_ip": clean_wan,
                                             "mac": obj.get("mac") or obj.get("macAddress"),
                                             "uuid": obj.get("uuid"),
                                             "category": cat,
@@ -478,12 +512,16 @@ class TuyaOEMMobileClient:
                 for r in records:
                     dev_id = r.get("device_id")
                     if dev_id and dev_id not in discovered:
+                        raw_ip = r.get("ip")
+                        clean_lan = raw_ip if is_private_lan_ip(raw_ip) else None
+                        clean_wan = raw_ip if (raw_ip and not clean_lan) else None
                         discovered[dev_id] = {
                             "id": dev_id,
                             "devId": dev_id,
                             "name": r.get("name", f"Appareil {dev_id[:6]}"),
                             "local_key": r.get("local_key"),
-                            "ip": r.get("ip"),
+                            "ip": clean_lan,
+                            "wan_ip": clean_wan,
                             "uuid": r.get("uuid"),
                             "online": r.get("is_online", True),
                             "product_name": f"{self.brand_key.upper()} Device",
@@ -526,20 +564,53 @@ class TuyaOEMMobileClient:
             await self._client.publish_dps(device_id, dps_payload)
             return True
         except Exception as err:
-            _LOGGER.error("Erreur lors de l'envoi de la commande mobile pour %s: %s", device_id, err)
+            err_msg = str(err)
+            if "DEVICE_OFFLINE" in err_msg or "offline" in err_msg.lower():
+                _LOGGER.warning("Appareil %s hors ligne (DEVICE_OFFLINE), commande non transmise", device_id)
+            else:
+                _LOGGER.error("Erreur lors de l'envoi de la commande mobile pour %s: %s", device_id, err)
             return False
 
     async def get_camera_stream_url(self, device_id: str) -> str | None:
         """Retrieve live RTSP or HLS stream URL for a camera device."""
         if not self._client:
             await self.login()
-        for api in ("tuya.m.ipc.stream.url.get", "m.ipc.stream.get", "thing.m.ipc.stream.get"):
+        for api in (
+            "m.ipc.v4.rtc.config.get",
+            "thing.m.rtc.config.get",
+            "m.ipc.media.stream.allocate",
+            "tuya.m.ipc.stream.url.get",
+            "m.ipc.stream.get",
+            "thing.m.ipc.stream.get",
+        ):
             try:
                 res = await self._client._call(api, {"devId": device_id, "deviceId": device_id})
                 if isinstance(res, dict):
-                    url = res.get("url") or res.get("rtsp") or res.get("hls") or res.get("live_url") or res.get("streamUrl")
+                    url = (
+                        res.get("url")
+                        or res.get("rtsp")
+                        or res.get("hls")
+                        or res.get("live_url")
+                        or res.get("streamUrl")
+                        or res.get("result", {}).get("url")
+                    )
                     if url and isinstance(url, str):
                         return url
             except Exception as e:
                 _LOGGER.debug("API %s for camera %s returned: %s", api, device_id, e)
+        return None
+
+    async def get_camera_snapshot_url(self, device_id: str) -> str | None:
+        """Retrieve latest snapshot URL for a camera."""
+        if not self._client:
+            await self.login()
+        for api in ("m.ipc.camera.cover.get", "thing.m.security.camera.cover.get"):
+            try:
+                res = await self._client._call(api, {"devId": device_id, "deviceId": device_id})
+                if isinstance(res, dict):
+                    cover = res.get("cover") or res.get("imageUrl") or res.get("coverUrl") or res.get("result", {}).get("cover")
+                    if cover and isinstance(cover, str):
+                        return cover
+            except Exception as e:
+                _LOGGER.debug("Snapshot API %s for camera %s returned: %s", api, device_id, e)
         return None

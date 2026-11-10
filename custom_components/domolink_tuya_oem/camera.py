@@ -97,7 +97,31 @@ class TuyaOEMCamera(CoordinatorEntity[TuyaOEMDataCoordinator], Camera):
     ) -> bytes | None:
         """Return snapshot image bytes."""
         dev = self.coordinator.data.get(self.device_id, {})
-        # Check if motion alert snapshot DP is available
+
+        # 1. First priority: delegate to linked HA camera if available
+        linked_cam = self.coordinator.find_linked_camera_entity(self.device_id, self._attr_name)
+        if linked_cam and self.hass:
+            try:
+                from homeassistant.components.camera import async_get_image
+                image_response = await async_get_image(self.hass, linked_cam, width=width, height=height)
+                if image_response and image_response.content:
+                    return image_response.content
+            except Exception as e:
+                _LOGGER.debug("Could not get image from linked camera %s: %s", linked_cam, e)
+
+        # 2. Check Tuya Mobile IPC Cloud snapshot API
+        if self.coordinator.mobile_client:
+            try:
+                snap_url = await self.coordinator.mobile_client.get_camera_snapshot_url(self.device_id)
+                if snap_url and snap_url.startswith("http"):
+                    session = async_get_clientsession(self.hass)
+                    async with session.get(snap_url, timeout=5) as resp:
+                        if resp.status == 200:
+                            return await resp.read()
+            except Exception as snap_err:
+                _LOGGER.debug("Failed to fetch cloud snapshot for %s: %s", self.device_id, snap_err)
+
+        # 3. Check if motion alert snapshot DP is available
         dps = dev.get("dps_status", {})
         pic_url = dps.get("115") or dps.get("movement_detect_pic")
         if pic_url and isinstance(pic_url, str) and pic_url.startswith("http"):
@@ -109,7 +133,7 @@ class TuyaOEMCamera(CoordinatorEntity[TuyaOEMDataCoordinator], Camera):
             except Exception as e:
                 _LOGGER.debug("Failed to fetch camera motion picture for %s: %s", self.device_id, e)
 
-        # Fallback to product icon if present
+        # 4. Fallback to product icon if present
         icon_url = dev.get("icon_url")
         if icon_url and icon_url.startswith("http"):
             try:

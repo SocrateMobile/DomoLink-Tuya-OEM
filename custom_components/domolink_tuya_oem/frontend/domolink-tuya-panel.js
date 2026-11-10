@@ -133,16 +133,24 @@ class DomolinkTuyaPanel extends HTMLElement {
     }
   }
 
-  async _updateDeviceMeta(deviceId, customName, forcedType, ip) {
+  async _updateDeviceMeta(deviceId, customName, forcedType, ip, rtspUrl) {
     if (!this._hass) return;
     try {
-      const res = await this._hass.callWS({
+      const payload = {
         type: "domolink_tuya_oem/update_device_meta",
         device_id: deviceId,
         custom_name: customName,
         forced_type: forcedType,
         ip: ip,
-      });
+      };
+      if (rtspUrl !== undefined) {
+        if (rtspUrl.startsWith("camera.")) {
+          payload.linked_camera_entity = rtspUrl;
+        } else {
+          payload.rtsp_url = rtspUrl;
+        }
+      }
+      const res = await this._hass.callWS(payload);
       if (res && res.success) {
         this._showToast("✨ Appareil mis à jour avec succès !");
         await this._fetchDashboard(true);
@@ -993,7 +1001,7 @@ class DomolinkTuyaPanel extends HTMLElement {
 
     // 1. LIGHT CONTROLS
     if (dev.device_type === "light") {
-      const swCode = caps.switch_dp || ("20" if "20" in dps else "1");
+      const swCode = caps.switch_dp || ("20" in dps ? "20" : "1");
       const isOn = Boolean(dps[swCode]);
       const brightVal = dps[caps.bright_dp] ? Math.round(dps[caps.bright_dp] / 10) : 100;
       const tempVal = dps[caps.temp_dp] || 500;
@@ -1183,7 +1191,8 @@ class DomolinkTuyaPanel extends HTMLElement {
                 <th>Appareil</th>
                 <th>Nom personnalisé</th>
                 <th>Type forcé</th>
-                <th>Adresse IP locale</th>
+                <th>IP LAN (Locale)</th>
+                <th>Flux RTSP / Caméra HA</th>
                 <th>Clé locale (AES)</th>
                 <th>Actions</th>
               </tr>
@@ -1196,10 +1205,10 @@ class DomolinkTuyaPanel extends HTMLElement {
                     <div style="font-size: 11px; color: #8b949e;">ID: ${dev.id}</div>
                   </td>
                   <td>
-                    <input type="text" class="form-input input-custom-name" style="width: 140px;" value="${this._escapeHtml(dev.name)}" />
+                    <input type="text" class="form-input input-custom-name" style="width: 130px;" value="${this._escapeHtml(dev.name)}" />
                   </td>
                   <td>
-                    <select class="form-select select-forced-type" style="width: 130px;">
+                    <select class="form-select select-forced-type" style="width: 120px;">
                       <option value="" ${dev.device_type === "" ? "selected" : ""}>Automatique</option>
                       <option value="light" ${dev.device_type === "light" ? "selected" : ""}>Éclairage</option>
                       <option value="switch" ${dev.device_type === "switch" ? "selected" : ""}>Prise / Switch</option>
@@ -1211,7 +1220,11 @@ class DomolinkTuyaPanel extends HTMLElement {
                     </select>
                   </td>
                   <td>
-                    <input type="text" class="form-input input-ip" style="width: 110px;" value="${this._escapeHtml(dev.ip || "")}" placeholder="192.168.1.X" />
+                    <input type="text" class="form-input input-ip" style="width: 105px;" value="${this._escapeHtml(dev.ip || "")}" placeholder="192.168.1.X" />
+                    ${dev.wan_ip ? `<div style="font-size: 10px; color: #8b949e;" title="IP Publique WAN box">WAN: ${this._escapeHtml(dev.wan_ip)}</div>` : ""}
+                  </td>
+                  <td>
+                    <input type="text" class="form-input input-rtsp" style="width: 130px;" value="${this._escapeHtml(dev.rtsp_url || dev.linked_camera_entity_id || "")}" placeholder="rtsp:// ou camera.xxx" />
                   </td>
                   <td>
                     <span style="font-family: monospace; font-size: 11px; color: #8b949e;">${dev.local_key ? dev.local_key.substring(0, 8) + "..." : "Non extraite"}</span>
@@ -1307,7 +1320,8 @@ class DomolinkTuyaPanel extends HTMLElement {
           const customName = row.querySelector(".input-custom-name").value;
           const forcedType = row.querySelector(".select-forced-type").value;
           const ip = row.querySelector(".input-ip").value;
-          this._updateDeviceMeta(devId, customName, forcedType, ip);
+          const rtsp = row.querySelector(".input-rtsp") ? row.querySelector(".input-rtsp").value : "";
+          this._updateDeviceMeta(devId, customName, forcedType, ip, rtsp);
         }
       };
     });
@@ -1315,6 +1329,28 @@ class DomolinkTuyaPanel extends HTMLElement {
 
   _bindDynamicControls() {
     const root = this.shadowRoot;
+
+    // Live Camera Stream Buttons
+    root.querySelectorAll("[data-live-cam]").forEach((btn) => {
+      btn.onclick = () => {
+        const devId = btn.dataset.liveCam;
+        const devices = (this._dashboardData && this._dashboardData.devices) || [];
+        const dev = devices.find((d) => d.id === devId);
+        if (!dev) return;
+        const targetEntity = dev.linked_camera_entity_id || dev.camera_entity_id;
+        if (targetEntity) {
+          this.dispatchEvent(new CustomEvent("hass-more-info", {
+            detail: { entityId: targetEntity },
+            bubbles: true,
+            composed: true,
+          }));
+        } else if (dev.rtsp_url) {
+          window.open(dev.rtsp_url, "_blank");
+        } else {
+          this._showToast("⚠️ Aucun flux caméra associé trouvé");
+        }
+      };
+    });
 
     // DP Inspector toggles
     root.querySelectorAll("[data-toggle-dps]").forEach((btn) => {

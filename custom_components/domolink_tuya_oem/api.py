@@ -89,6 +89,9 @@ async def ws_get_dashboard(
                 elif isinstance(pd, dict):
                     parsed_dps_json[dp_id] = pd
 
+            is_cam = (caps.get("device_type") == "camera" or dev.get("device_type") == "camera" or dev.get("category") == "sp")
+            linked_cam = coordinator.find_linked_camera_entity(dev_id, caps.get("name") or dev.get("name") or "") if is_cam else None
+
             devices.append({
                 "id": dev_id,
                 "name": caps.get("name") or dev.get("name") or f"Appareil {dev_id[:6]}",
@@ -100,6 +103,10 @@ async def ws_get_dashboard(
                 "online": is_online,
                 "lan_active": is_lan,
                 "ip": dev.get("ip") or "",
+                "wan_ip": dev.get("wan_ip") or "",
+                "rtsp_url": coordinator.overrides.get(dev_id, {}).get("rtsp_url") or dev.get("rtsp_url") or "",
+                "camera_entity_id": f"camera.{dev_id}_camera" if is_cam else "",
+                "linked_camera_entity_id": linked_cam or "",
                 "local_key": dev.get("local_key") or "",
                 "entry_id": entry_id,
                 "light_caps": caps.get("light_caps") or {},
@@ -230,13 +237,15 @@ async def ws_send_dp_command(
         vol.Optional("custom_name"): cv.string,
         vol.Optional("forced_type"): cv.string,
         vol.Optional("ip"): cv.string,
+        vol.Optional("rtsp_url"): cv.string,
+        vol.Optional("linked_camera_entity"): cv.string,
     }
 )
 @websocket_api.async_response
 async def ws_update_device_meta(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
-    """Save user overrides (renaming, forced type, manual IP) to disk."""
+    """Save user overrides (renaming, forced type, manual IP, RTSP URL) to disk."""
     device_id = msg["device_id"]
     domain_data = hass.data.get(DOMAIN, {})
 
@@ -259,6 +268,10 @@ async def ws_update_device_meta(
         overrides["forced_type"] = msg["forced_type"].strip()
     if "ip" in msg:
         overrides["ip"] = msg["ip"].strip()
+    if "rtsp_url" in msg:
+        overrides["rtsp_url"] = msg["rtsp_url"].strip()
+    if "linked_camera_entity" in msg:
+        overrides["linked_camera_entity"] = msg["linked_camera_entity"].strip()
 
     await target_coordinator.async_save_device_override(device_id, overrides)
     connection.send_result(msg["id"], {"success": True, "overrides": overrides})

@@ -1,7 +1,9 @@
 """Unit tests for DomoLink Tuya OEM DP Registry, Manifest and Capabilities."""
+import asyncio
 import importlib.util
 import json
 import os
+import subprocess
 import sys
 import pytest
 
@@ -17,15 +19,25 @@ dp_registry = importlib.util.module_from_spec(spec)
 sys.modules["dp_registry"] = dp_registry
 spec.loader.exec_module(dp_registry)
 
+# Load tuya_api for is_private_lan_ip
+api_spec = importlib.util.spec_from_file_location(
+    "tuya_api",
+    os.path.join(COMPONENT_DIR, "tuya_api.py"),
+)
+tuya_api = importlib.util.module_from_spec(api_spec)
+sys.modules["tuya_api"] = tuya_api
+api_spec.loader.exec_module(tuya_api)
+
 classify_device = dp_registry.classify_device
 resolve_device_icon = dp_registry.resolve_device_icon
 tuya_hsv_to_hs = dp_registry.tuya_hsv_to_hs
 hs_to_tuya_hsv = dp_registry.hs_to_tuya_hsv
 parse_device_capabilities = dp_registry.parse_device_capabilities
+is_private_lan_ip = tuya_api.is_private_lan_ip
 
 
 def test_manifest_structure_and_version():
-    """Verify manifest.json has valid domain, codeowners, and version 2.0.0."""
+    """Verify manifest.json has valid domain, codeowners, and version 2.0.1."""
     manifest_path = os.path.join(COMPONENT_DIR, "manifest.json")
     assert os.path.isfile(manifest_path)
     with open(manifest_path, "r", encoding="utf-8") as f:
@@ -33,7 +45,7 @@ def test_manifest_structure_and_version():
 
     assert manifest["domain"] == "domolink_tuya_oem"
     assert manifest["name"] == "DomoLink Tuya OEM Multi-Brand"
-    assert manifest["version"] == "2.0.0"
+    assert manifest["version"] == "2.0.1"
     assert "@SocrateMobile" in manifest["codeowners"]
     assert "tuya-mobile>=1.2.0" in manifest["requirements"]
 
@@ -177,3 +189,46 @@ def test_frontend_panel_file_exists():
     panel_js = os.path.join(COMPONENT_DIR, "frontend", "domolink-tuya-panel.js")
     assert os.path.isfile(panel_js)
     assert os.path.getsize(panel_js) > 1000
+
+
+def test_frontend_js_syntax():
+    """Verify that domolink-tuya-panel.js has valid JavaScript syntax with node --check."""
+    panel_js = os.path.join(COMPONENT_DIR, "frontend", "domolink-tuya-panel.js")
+    result = subprocess.run(["node", "--check", panel_js], capture_output=True, text=True)
+    assert result.returncode == 0, f"JS Syntax Error:\n{result.stderr}"
+
+
+def test_is_private_lan_ip_filtering():
+    """Verify strict detection of private LAN IPs vs public WAN IPs."""
+    # Private RFC1918 IPs -> True
+    assert is_private_lan_ip("192.168.1.50") is True
+    assert is_private_lan_ip("192.168.0.1") is True
+    assert is_private_lan_ip("10.0.0.12") is True
+    assert is_private_lan_ip("172.16.0.5") is True
+
+    # Public WAN IPs (Orange box, etc.) -> False
+    assert is_private_lan_ip("80.215.210.27") is False
+    assert is_private_lan_ip("80.215.138.41") is False
+    assert is_private_lan_ip("8.8.8.8") is False
+
+    # Special / Invalid -> False
+    assert is_private_lan_ip("127.0.0.1") is False  # Loopback rejected
+    assert is_private_lan_ip("0.0.0.0") is False
+    assert is_private_lan_ip("") is False
+    assert is_private_lan_ip(None) is False
+    assert is_private_lan_ip("invalid_ip") is False
+
+
+def test_send_command_device_offline_handling():
+    """Verify send_command catches DEVICE_OFFLINE gracefully without uncaught exceptions."""
+    class DummyClient:
+        async def publish_dps(self, dev_id, dps):
+            raise Exception("Tuya DP publish failed: DEVICE_OFFLINE Device offline")
+
+    async def _test():
+        client = tuya_api.TuyaOEMMobileClient(brand_key="smartlife", username="u", password="p")
+        client._client = DummyClient()
+        success = await client.send_command("offline_dev", [{"code": "1", "value": True}])
+        assert success is False
+
+    asyncio.run(_test())
