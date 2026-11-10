@@ -1081,6 +1081,11 @@ class DomolinkTuyaPanel extends HTMLElement {
                 }).join("")}
               </tbody>
             </table>
+            <div style="display: flex; justify-content: flex-end; margin-top: 8px;">
+              <button class="btn-action btn-export-device" data-dev-id="${dev.id}" style="font-size: 11px; padding: 4px 10px;">
+                📥 Exporter la fiche technique (JSON)
+              </button>
+            </div>
           ` : ""}
         </div>
       </div>
@@ -1552,6 +1557,45 @@ class DomolinkTuyaPanel extends HTMLElement {
         this._sendRawDp(rng.dataset.devId, rng.dataset.dp, Number(rng.value));
       };
     });
+
+    // Device technical sheet export
+    root.querySelectorAll(".btn-export-device").forEach((btn) => {
+      btn.onclick = () => {
+        this._exportDeviceCard(btn.dataset.devId);
+      };
+    });
+  }
+
+  _exportDeviceCard(devId) {
+    const devices = (this._dashboardData && this._dashboardData.devices) || [];
+    const dev = devices.find((d) => d.id === devId);
+    if (!dev) return;
+
+    const exportData = {
+      id: dev.id,
+      name: dev.name,
+      product_name: dev.product_name,
+      brand_name: dev.brand_name,
+      category: dev.category,
+      device_type: dev.device_type,
+      online: dev.online,
+      lan_active: dev.lan_active,
+      lan_method: dev.lan_method,
+      ip: dev.ip,
+      masked_local_key: dev.local_key ? dev.local_key.substring(0, 4) + "..." + dev.local_key.substring(dev.local_key.length - 4) : "",
+      parsed_dps: dev.parsed_dps,
+      raw_dps: dev.raw_dps,
+      export_date: new Date().toISOString(),
+    };
+
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${dev.name.replace(/[^a-zA-Z0-9_-]/g, "_")}_fiche_technique.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    this._showToast(`📄 Fiche technique exportée pour ${dev.name}`);
   }
 }
 
