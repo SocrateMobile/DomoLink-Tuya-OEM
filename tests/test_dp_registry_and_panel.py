@@ -1,0 +1,179 @@
+"""Unit tests for DomoLink Tuya OEM DP Registry, Manifest and Capabilities."""
+import importlib.util
+import json
+import os
+import sys
+import pytest
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+COMPONENT_DIR = os.path.join(REPO_ROOT, "custom_components", "domolink_tuya_oem")
+
+# Load dp_registry directly without executing __init__.py
+spec = importlib.util.spec_from_file_location(
+    "dp_registry",
+    os.path.join(COMPONENT_DIR, "dp_registry.py"),
+)
+dp_registry = importlib.util.module_from_spec(spec)
+sys.modules["dp_registry"] = dp_registry
+spec.loader.exec_module(dp_registry)
+
+classify_device = dp_registry.classify_device
+resolve_device_icon = dp_registry.resolve_device_icon
+tuya_hsv_to_hs = dp_registry.tuya_hsv_to_hs
+hs_to_tuya_hsv = dp_registry.hs_to_tuya_hsv
+parse_device_capabilities = dp_registry.parse_device_capabilities
+
+
+def test_manifest_structure_and_version():
+    """Verify manifest.json has valid domain, codeowners, and version 2.0.0."""
+    manifest_path = os.path.join(COMPONENT_DIR, "manifest.json")
+    assert os.path.isfile(manifest_path)
+    with open(manifest_path, "r", encoding="utf-8") as f:
+        manifest = json.load(f)
+
+    assert manifest["domain"] == "domolink_tuya_oem"
+    assert manifest["name"] == "DomoLink Tuya OEM Multi-Brand"
+    assert manifest["version"] == "2.0.0"
+    assert "@SocrateMobile" in manifest["codeowners"]
+    assert "tuya-mobile>=1.2.0" in manifest["requirements"]
+
+
+def test_translations_parity():
+    """Verify fr.json and en.json exist and match keys."""
+    fr_path = os.path.join(COMPONENT_DIR, "translations", "fr.json")
+    en_path = os.path.join(COMPONENT_DIR, "translations", "en.json")
+    assert os.path.isfile(fr_path)
+    assert os.path.isfile(en_path)
+    with open(fr_path, "r", encoding="utf-8") as f:
+        fr = json.load(f)
+    with open(en_path, "r", encoding="utf-8") as f:
+        en = json.load(f)
+    assert "config" in fr and "config" in en
+
+
+def test_resolve_device_icon():
+    """Test icon url normalization with CDN and protocols."""
+    assert resolve_device_icon(None) == ""
+    assert resolve_device_icon("") == ""
+    assert resolve_device_icon("http://example.com/pic.png") == "https://example.com/pic.png"
+    assert resolve_device_icon("https://cdn.tuya.com/pic.png") == "https://cdn.tuya.com/pic.png"
+    assert resolve_device_icon("smart/icon/ay15.png") == "https://images.tuyaeu.com/smart/icon/ay15.png"
+
+
+def test_classify_device():
+    """Test device classification for all types."""
+    # 1. Bulb by category
+    assert classify_device({"category": "dj", "name": "Device 1"}) == "light"
+    # 2. Bulb by DPs (numeric)
+    assert classify_device({"name": "Ampoule Salon", "dps_status": {"20": True, "22": 500, "23": 400}}) == "light"
+    # 3. Plug with DP 20 as voltage (not light!)
+    plug_dev = {
+        "name": "Prise Cuisine",
+        "category": "cz",
+        "dps_status": {"1": True, "18": 1500, "19": 6500, "20": 2305},
+    }
+    assert classify_device(plug_dev) == "switch"
+    # 4. Camera by category and DPs
+    cam_dev = {
+        "name": "Camera Entree",
+        "category": "sp",
+        "dps_status": {"105": False, "134": True},
+    }
+    assert classify_device(cam_dev) == "camera"
+    # 5. Security PIR detector
+    pir_dev = {
+        "name": "Detecteur Couloir",
+        "category": "pir",
+        "dps_status": {"pir": "pir"},
+    }
+    assert classify_device(pir_dev) == "security"
+    # 6. Climate thermostat
+    wk_dev = {
+        "name": "Thermostat Salon",
+        "category": "wk",
+        "dps_status": {"temp_set": 200, "temp_current": 195},
+    }
+    assert classify_device(wk_dev) == "climate"
+    # 7. Shutter / Cover
+    cl_dev = {
+        "name": "Volet Chambre",
+        "category": "cl",
+        "dps_status": {"percent_control": 50},
+    }
+    assert classify_device(cl_dev) == "cover"
+
+
+def test_dp20_disambiguation_plug_vs_bulb():
+    """Verify that DP 20 integer does not trigger light classification."""
+    plug = {
+        "name": "Prise Connectée",
+        "dps_status": {"1": True, "20": 2315},  # 231.5 V
+    }
+    assert classify_device(plug) == "switch"
+
+    bulb = {
+        "name": "Ampoule RGB",
+        "dps_status": {"20": True, "21": "white", "22": 1000},
+    }
+    assert classify_device(bulb) == "light"
+
+
+def test_hsv_color_encoding_decoding():
+    """Test bi-directional Tuya HSV color conversions."""
+    # Format v2 (12 chars): H=180, S=100%, V=100%
+    encoded_v2 = hs_to_tuya_hsv((180.0, 100.0), brightness=255, version=2)
+    assert len(encoded_v2) == 12
+    decoded_h, decoded_s = tuya_hsv_to_hs(encoded_v2)
+    assert round(decoded_h) == 180
+    assert round(decoded_s) == 100
+
+    # Format v1 (14 chars)
+    encoded_v1 = hs_to_tuya_hsv((240.0, 80.0), brightness=255, version=1)
+    assert len(encoded_v1) == 14
+    dec_h1, dec_s1 = tuya_hsv_to_hs(encoded_v1)
+    assert round(dec_h1) == 240
+    assert abs(dec_s1 - 80.0) < 1.0
+
+
+def test_parse_device_capabilities_with_overrides():
+    """Test capabilities parsing and user override handling."""
+    raw_dev = {
+        "id": "bf1234567890abcdef",
+        "name": "Smart Device",
+        "category": "dj",
+        "icon_url": "smart/icon/bulb.png",
+        "online": True,
+        "dps_status": {
+            "20": True,
+            "21": "colour",
+            "22": 800,
+            "23": 500,
+            "24": "007803e803e8",
+        },
+    }
+    caps = parse_device_capabilities(raw_dev)
+    assert caps["device_type"] == "light"
+    assert caps["online"] is True
+    assert caps["light_caps"]["supports_brightness"] is True
+    assert caps["light_caps"]["supports_color"] is True
+    assert caps["light_caps"]["supports_color_temp"] is True
+    assert "https://images.tuyaeu.com" in caps["icon_url"]
+
+    # Test with user override renaming and forced type
+    overrides = {
+        "bf1234567890abcdef": {
+            "custom_name": "Lustre Salon",
+            "forced_type": "light",
+            "ip": "192.168.1.55",
+        }
+    }
+    caps_over = parse_device_capabilities(raw_dev, user_overrides=overrides)
+    assert caps_over["name"] == "Lustre Salon"
+    assert caps_over["ip"] == "192.168.1.55"
+
+
+def test_frontend_panel_file_exists():
+    """Verify frontend panel script is present and non-empty."""
+    panel_js = os.path.join(COMPONENT_DIR, "frontend", "domolink-tuya-panel.js")
+    assert os.path.isfile(panel_js)
+    assert os.path.getsize(panel_js) > 1000

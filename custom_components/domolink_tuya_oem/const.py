@@ -152,8 +152,15 @@ OEM_PROFILES = {
 PLATFORMS = [
     "switch",
     "light",
+    "camera",
     "cover",
     "climate",
     "sensor",
     "binary_sensor",
 ]
+
+PANEL_NAME = "DomoLink Tuya OEM"
+PANEL_TITLE = "DomoLink Tuya"
+PANEL_ICON = "mdi:home-lightning-bolt"
+PANEL_URL = "domolink_tuya"
+VERSION = "2.0.0"

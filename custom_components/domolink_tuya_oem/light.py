@@ -7,6 +7,7 @@ from typing import Any
 from homeassistant.components.light import (
     ATTR_BRIGHTNESS,
     ATTR_COLOR_TEMP_KELVIN,
+    ATTR_HS_COLOR,
     ColorMode,
     LightEntity,
 )
@@ -18,42 +19,14 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import TuyaOEMDataCoordinator
+from .dp_registry import classify_device, hs_to_tuya_hsv, tuya_hsv_to_hs
 
 _LOGGER = logging.getLogger(__name__)
-
-LIGHT_CATEGORIES = ("dj", "dd", "dc", "xdd", "fwd", "jsq")
-LIGHT_KEYWORDS = ("ampoule", "bulb", "light", "lampe", "spot", "ruban", "strip", "e27", "gu10", "e14", "plafonnier", "luminaire")
 
 
 def is_light_device(dev_data: dict[str, Any]) -> bool:
     """Determine whether a Tuya device is a light."""
-    cat = dev_data.get("category", "").lower()
-    if cat in LIGHT_CATEGORIES:
-        return True
-
-    name = (dev_data.get("name") or "").lower()
-    prod_name = (dev_data.get("product_name") or "").lower()
-    if any(k in name for k in LIGHT_KEYWORDS) or any(k in prod_name for k in LIGHT_KEYWORDS):
-        return True
-
-    dps = dev_data.get("dps_status", {})
-    # Cloud DP names
-    if any(k in dps for k in ("switch_led", "bright_value", "bright_value_v2", "temp_value", "temp_value_v2", "colour_data")):
-        return True
-
-    # Tuya Mobile numeric DPs (Protocol v2: 20=switch, 21=mode, 22=bright, 23=temp, 24=colour)
-    if "20" in dps and any(k in dps for k in ("21", "22", "23", "24", "25")):
-        return True
-
-    # Tuya Mobile numeric DPs (Protocol v1: 1=switch, 2=mode, 3=bright, 4=temp, 5=colour)
-    if "1" in dps and any(k in dps for k in ("2", "3", "4", "5")):
-        return True
-
-    # Standalone lighting DPs
-    if "22" in dps or "23" in dps or "3" in dps or "4" in dps:
-        return True
-
-    return False
+    return classify_device(dev_data) == "light"
 
 
 async def async_setup_entry(
@@ -72,7 +45,10 @@ async def async_setup_entry(
 
 
 class TuyaOEMLight(CoordinatorEntity[TuyaOEMDataCoordinator], LightEntity):
-    """Representation of a Tuya OEM Light."""
+    """Representation of a Tuya OEM Light with Dimmer, Color Temp and RGB."""
+
+    _attr_min_color_temp_kelvin = 2700
+    _attr_max_color_temp_kelvin = 6500
 
     def __init__(
         self,
@@ -104,37 +80,70 @@ class TuyaOEMLight(CoordinatorEntity[TuyaOEMDataCoordinator], LightEntity):
             modes.add(ColorMode.BRIGHTNESS)
         if any(k in dps for k in ("temp_value", "temp_value_v2", "23", "4")):
             modes.add(ColorMode.COLOR_TEMP)
+        if any(k in dps for k in ("colour_data", "colour_data_v2", "24", "5")):
+            modes.add(ColorMode.HS)
 
         self._attr_supported_color_modes = modes
-        if ColorMode.COLOR_TEMP in modes:
-            self._attr_color_mode = ColorMode.COLOR_TEMP
-            self._attr_min_color_temp_kelvin = 2700
-            self._attr_max_color_temp_kelvin = 6500
-        elif ColorMode.BRIGHTNESS in modes:
-            self._attr_color_mode = ColorMode.BRIGHTNESS
-        else:
-            self._attr_color_mode = ColorMode.ONOFF
+
+    @property
+    def available(self) -> bool:
+        """Return True if device is available / online."""
+        dev = self.coordinator.data.get(self.device_id, {})
+        return bool(dev.get("online", True))
+
+    @property
+    def entity_picture(self) -> str | None:
+        """Return official product picture from Tuya."""
+        dev = self.coordinator.data.get(self.device_id, {})
+        return dev.get("icon_url") or None
 
     def _get_switch_dp(self, dps: dict[str, Any]) -> str:
-        """Find the active power DP code."""
+        """Find active power switch DP."""
         for code in ("20", "switch_led", "1", "switch_1", "switch"):
-            if code in dps:
+            if code in dps and isinstance(dps[code], bool):
                 return code
         return "20" if "22" in dps else "1"
 
     def _get_brightness_dp(self, dps: dict[str, Any]) -> str:
-        """Find the active brightness DP code."""
+        """Find active brightness DP."""
         for code in ("22", "bright_value_v2", "bright_value", "3"):
             if code in dps:
                 return code
         return "22"
 
     def _get_temp_dp(self, dps: dict[str, Any]) -> str:
-        """Find the active color temperature DP code."""
+        """Find active color temp DP."""
         for code in ("23", "temp_value_v2", "temp_value", "4"):
             if code in dps:
                 return code
         return "23"
+
+    def _get_color_dp(self, dps: dict[str, Any]) -> str:
+        """Find active HSV color DP."""
+        for code in ("24", "colour_data_v2", "colour_data", "5"):
+            if code in dps:
+                return code
+        return "24"
+
+    def _get_mode_dp(self, dps: dict[str, Any]) -> str | None:
+        """Find work mode DP."""
+        for code in ("21", "work_mode", "2"):
+            if code in dps:
+                return code
+        return None
+
+    @property
+    def color_mode(self) -> ColorMode:
+        """Return active color mode."""
+        dps = self.coordinator.data.get(self.device_id, {}).get("dps_status", {})
+        mode_code = self._get_mode_dp(dps)
+        if mode_code and dps.get(mode_code) == "colour" and ColorMode.HS in self._attr_supported_color_modes:
+            return ColorMode.HS
+        if ColorMode.COLOR_TEMP in self._attr_supported_color_modes:
+            return ColorMode.COLOR_TEMP
+        if ColorMode.BRIGHTNESS in self._attr_supported_color_modes:
+            return ColorMode.BRIGHTNESS
+        return ColorMode.ONOFF
 
     @property
     def is_on(self) -> bool:
@@ -151,7 +160,6 @@ class TuyaOEMLight(CoordinatorEntity[TuyaOEMDataCoordinator], LightEntity):
         val = dps.get(code)
         if val is None:
             return None
-        # Scale: Tuya is 10..1000 or 1..255
         try:
             int_val = int(val)
             if int_val > 255:
@@ -170,31 +178,55 @@ class TuyaOEMLight(CoordinatorEntity[TuyaOEMDataCoordinator], LightEntity):
             return None
         try:
             int_val = int(val)
-            # Scale 0..1000 to 2700..6500K
             return int(2700 + (int_val / 1000.0) * (6500 - 2700))
         except (ValueError, TypeError):
             return None
 
+    @property
+    def hs_color(self) -> tuple[float, float] | None:
+        """Return (Hue, Saturation) color tuple."""
+        dps = self.coordinator.data.get(self.device_id, {}).get("dps_status", {})
+        code = self._get_color_dp(dps)
+        val = dps.get(code)
+        if val and isinstance(val, str):
+            return tuya_hsv_to_hs(val)
+        return None
+
     async def async_turn_on(self, **kwargs: Any) -> None:
-        """Turn on the light with optional brightness and color temperature."""
+        """Turn on the light with optional brightness, color temp or HS color."""
         commands: list[dict[str, Any]] = []
         dps = self.coordinator.data.get(self.device_id, {}).get("dps_status", {})
 
         switch_code = self._get_switch_dp(dps)
         commands.append({"code": switch_code, "value": True})
 
-        if ATTR_BRIGHTNESS in kwargs:
-            b_val = kwargs[ATTR_BRIGHTNESS]
-            b_code = self._get_brightness_dp(dps)
-            tuya_bright = max(10, min(1000, int(b_val * 1000 / 255)))
-            commands.append({"code": b_code, "value": tuya_bright})
+        mode_dp = self._get_mode_dp(dps)
 
-        if ATTR_COLOR_TEMP_KELVIN in kwargs:
+        if ATTR_HS_COLOR in kwargs:
+            hs = kwargs[ATTR_HS_COLOR]
+            c_code = self._get_color_dp(dps)
+            b_val = kwargs.get(ATTR_BRIGHTNESS, self.brightness or 255)
+            # Encode Tuya HSV
+            version = 1 if c_code in ("colour_data", "5") else 2
+            hsv_str = hs_to_tuya_hsv(hs, brightness=b_val, version=version)
+            commands.append({"code": c_code, "value": hsv_str})
+            if mode_dp:
+                commands.append({"code": mode_dp, "value": "colour"})
+
+        elif ATTR_COLOR_TEMP_KELVIN in kwargs:
             kelvin = kwargs[ATTR_COLOR_TEMP_KELVIN]
             t_code = self._get_temp_dp(dps)
             tuya_temp = int(((kelvin - 2700) / (6500 - 2700)) * 1000)
             tuya_temp = max(0, min(1000, tuya_temp))
             commands.append({"code": t_code, "value": tuya_temp})
+            if mode_dp:
+                commands.append({"code": mode_dp, "value": "white"})
+
+        if ATTR_BRIGHTNESS in kwargs and ATTR_HS_COLOR not in kwargs:
+            b_val = kwargs[ATTR_BRIGHTNESS]
+            b_code = self._get_brightness_dp(dps)
+            tuya_bright = max(10, min(1000, int(b_val * 1000 / 255)))
+            commands.append({"code": b_code, "value": tuya_bright})
 
         await self.coordinator.async_send_command(self.device_id, commands)
 

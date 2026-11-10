@@ -73,6 +73,18 @@ class TuyaOEMCover(CoordinatorEntity[TuyaOEMDataCoordinator], CoverEntity):
         )
 
     @property
+    def available(self) -> bool:
+        """Return True if device is online."""
+        dev = self.coordinator.data.get(self.device_id, {})
+        return bool(dev.get("online", True))
+
+    @property
+    def entity_picture(self) -> str | None:
+        """Return product photo from Tuya."""
+        dev = self.coordinator.data.get(self.device_id, {})
+        return dev.get("icon_url") or None
+
+    @property
     def current_cover_position(self) -> int | None:
         """Return position between 0 and 100."""
         dps = self.coordinator.data.get(self.device_id, {}).get("dps_status", {})
