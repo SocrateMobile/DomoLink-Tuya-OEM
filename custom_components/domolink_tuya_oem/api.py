@@ -362,15 +362,14 @@ async def ws_scan_lan(
     updated_count = 0
     for dev_id, info in discovered.items():
         ip = info.get("ip")
+        ver = info.get("version", "3.3")
         if not ip:
             continue
         for entry_id, data in domain_data.items():
             if isinstance(data, dict) and "coordinator" in data:
                 coord: TuyaOEMDataCoordinator = data["coordinator"]
-                if dev_id in coord.data:
-                    coord.data[dev_id]["ip"] = ip
-                    coord.data[dev_id]["lan_active"] = True
-                    await coord.async_save_device_override(dev_id, {"ip": ip})
+                if dev_id in coord.devices or dev_id in coord.data:
+                    coord._handle_local_device_discovered(dev_id, ip, ver)
                     updated_count += 1
 
     connection.send_result(
