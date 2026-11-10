@@ -74,6 +74,18 @@ class TuyaOEMClimate(CoordinatorEntity[TuyaOEMDataCoordinator], ClimateEntity):
         )
 
     @property
+    def available(self) -> bool:
+        """Return True if device is online."""
+        dev = self.coordinator.data.get(self.device_id, {})
+        return bool(dev.get("online", True))
+
+    @property
+    def entity_picture(self) -> str | None:
+        """Return product photo from Tuya."""
+        dev = self.coordinator.data.get(self.device_id, {})
+        return dev.get("icon_url") or None
+
+    @property
     def current_temperature(self) -> float | None:
         """Return current temperature."""
         dps = self.coordinator.data.get(self.device_id, {}).get("dps_status", {})

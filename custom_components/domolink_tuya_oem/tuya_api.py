@@ -258,6 +258,16 @@ class TuyaOEMClient:
                 _LOGGER.error("Failed to send command to device %s: %s", device_id, e)
                 return False
 
+    async def get_camera_stream_url(self, device_id: str) -> str | None:
+        """Fetch live stream URL via Cloud OpenAPI."""
+        try:
+            res = await self.request("POST", f"/v1.0/devices/{device_id}/stream/actions/allocate")
+            if isinstance(res, dict):
+                return res.get("url") or res.get("rtsp") or res.get("hls")
+        except Exception as e:
+            _LOGGER.debug("Cloud stream allocation error for %s: %s", device_id, e)
+        return None
+
 
 class TuyaOEMMobileClient:
     """Async client imitating smartphone app connection via Tuya Mobile Gateway."""
@@ -436,16 +446,23 @@ class TuyaOEMMobileClient:
                                         cat = obj.get("category") or p_bean.get("category") or ""
                                         p_name = obj.get("productName") or p_bean.get("name") or f"{self.brand_key.upper()} Device"
                                         dps = obj.get("dps") or {}
+                                        icon_url = obj.get("iconUrl") or obj.get("icon") or p_bean.get("iconUrl") or p_bean.get("icon") or ""
+                                        dp_names = obj.get("dpName") or obj.get("dpsName") or {}
+                                        schema_info = obj.get("schemaInfo") or p_bean.get("schemaInfo") or obj.get("schema")
                                         discovered[dev_id] = {
                                             "id": dev_id,
                                             "devId": dev_id,
                                             "name": obj.get("name") or obj.get("customName") or obj.get("devName") or f"Appareil {dev_id[:6]}",
                                             "local_key": obj.get("localKey") or obj.get("local_key") or obj.get("secKey"),
                                             "ip": obj.get("ip") or obj.get("lanIp"),
+                                            "mac": obj.get("mac") or obj.get("macAddress"),
                                             "uuid": obj.get("uuid"),
                                             "category": cat,
                                             "product_name": p_name,
                                             "product_id": obj.get("productId") or p_bean.get("id"),
+                                            "icon_url": icon_url,
+                                            "dp_names": dp_names,
+                                            "schema_info": schema_info,
                                             "online": obj.get("isOnline") if "isOnline" in obj else obj.get("cloudOnline", True),
                                             "dps": dps,
                                         }
@@ -511,3 +528,18 @@ class TuyaOEMMobileClient:
         except Exception as err:
             _LOGGER.error("Erreur lors de l'envoi de la commande mobile pour %s: %s", device_id, err)
             return False
+
+    async def get_camera_stream_url(self, device_id: str) -> str | None:
+        """Retrieve live RTSP or HLS stream URL for a camera device."""
+        if not self._client:
+            await self.login()
+        for api in ("tuya.m.ipc.stream.url.get", "m.ipc.stream.get", "thing.m.ipc.stream.get"):
+            try:
+                res = await self._client._call(api, {"devId": device_id, "deviceId": device_id})
+                if isinstance(res, dict):
+                    url = res.get("url") or res.get("rtsp") or res.get("hls") or res.get("live_url") or res.get("streamUrl")
+                    if url and isinstance(url, str):
+                        return url
+            except Exception as e:
+                _LOGGER.debug("API %s for camera %s returned: %s", api, device_id, e)
+        return None

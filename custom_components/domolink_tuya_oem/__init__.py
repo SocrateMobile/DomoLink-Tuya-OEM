@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import logging
+import os
 
+from homeassistant.components import frontend
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
+from .api import register_websocket_handlers
 from .const import (
     CONF_BRAND,
     CONF_CLIENT_ID,
@@ -28,7 +31,11 @@ from .const import (
     MODE_LOCAL,
     MODE_MOBILE,
     OEM_PROFILES,
+    PANEL_ICON,
+    PANEL_TITLE,
+    PANEL_URL,
     PLATFORMS,
+    VERSION,
 )
 from .coordinator import TuyaOEMDataCoordinator
 from .tuya_api import (
@@ -42,9 +49,60 @@ from .tuya_local import TuyaLocalDevice
 _LOGGER = logging.getLogger(__name__)
 
 
+async def _async_register_frontend_panel(hass: HomeAssistant) -> None:
+    """Register custom DomoLink glassmorphism panel in HA sidebar."""
+    frontend_dir = os.path.join(os.path.dirname(__file__), "frontend")
+
+    # Static path config
+    if hasattr(hass.http, "async_register_static_paths"):
+        from homeassistant.components.http import StaticPathConfig
+        await hass.http.async_register_static_paths([
+            StaticPathConfig("/domolink_tuya_panel", frontend_dir, False)
+        ])
+    else:
+        hass.http.register_static_path(
+            "/domolink_tuya_panel",
+            frontend_dir,
+            cache_headers=False,
+        )
+
+    try:
+        frontend.async_remove_panel(hass, PANEL_URL)
+    except Exception:
+        pass
+
+    try:
+        frontend.async_register_built_in_panel(
+            hass,
+            component_name="custom",
+            sidebar_title=PANEL_TITLE,
+            sidebar_icon=PANEL_ICON,
+            frontend_url_path=PANEL_URL,
+            config={
+                "_panel_custom": {
+                    "name": "domolink-tuya-panel",
+                    "module_url": f"/domolink_tuya_panel/domolink-tuya-panel.js?v={VERSION}",
+                }
+            },
+            require_admin=False,
+        )
+    except (ValueError, Exception) as e:
+        _LOGGER.debug("Panel registration notice: %s", e)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up DomoLink Tuya OEM from a config entry."""
     hass.data.setdefault(DOMAIN, {})
+
+    # Register WebSocket handlers once
+    if not hass.data[DOMAIN].get("ws_registered"):
+        register_websocket_handlers(hass)
+        hass.data[DOMAIN]["ws_registered"] = True
+
+    # Register frontend panel once
+    if not hass.data[DOMAIN].get("panel_registered"):
+        await _async_register_frontend_panel(hass)
+        hass.data[DOMAIN]["panel_registered"] = True
 
     data = entry.data
     mode = data.get(CONF_MODE, MODE_LOCAL)
@@ -125,7 +183,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
         return True
 
-    # --- 2. CLOUD SETUP ---
+    # --- 3. DEVELOPER CLOUD SETUP ---
     client_id = data[CONF_CLIENT_ID]
     secret = data[CONF_SECRET]
     endpoint = data.get(CONF_ENDPOINT, "https://openapi.tuyaeu.com")
@@ -176,5 +234,14 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 await entry_data["client"].close()
             if "mobile_client" in entry_data and entry_data["mobile_client"]:
                 await entry_data["mobile_client"].close()
+
+        # If no active entries remain, remove panel
+        active_entries = [k for k in hass.data[DOMAIN].keys() if not k.endswith("_registered")]
+        if not active_entries:
+            try:
+                frontend.async_remove_panel(hass, PANEL_URL)
+                hass.data[DOMAIN]["panel_registered"] = False
+            except Exception:
+                pass
 
     return unload_ok

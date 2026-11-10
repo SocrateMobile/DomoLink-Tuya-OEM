@@ -1,13 +1,13 @@
 # DomoLink Tuya OEM Multi-Brand for Home Assistant
 
 [![Documentation Officielle](https://img.shields.io/badge/Documentation-socratemobile.fr-06b6d4.svg?logo=googlechrome&logoColor=white)](https://socratemobile.fr/integration.html?id=domolink-tuya-oem)
-
-> 🌐 **Site officiel & Documentation complète** : Retrouvez le guide d'installation pas à pas, les entités supportées et les exemples d'automatisations sur [socratemobile.fr](https://socratemobile.fr/integration.html?id=domolink-tuya-oem).
-
+[![Version 2.0.0](https://img.shields.io/badge/version-2.0.0-blue.svg)](https://github.com/SocrateMobile/DomoLink-Tuya-OEM/releases)
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
 [![Home Assistant](https://img.shields.io/badge/Home--Assistant-2024.1%2B-blue.svg)](https://www.home-assistant.io/)
 
-Intégration personnalisée Home Assistant permettant de connecter et piloter directement les objets connectés issus des applications **Tuya en marque blanche (OEM)**, notamment :
+> 🌐 **Site officiel & Documentation complète** : Retrouvez le guide d'installation pas à pas, les entités supportées et les exemples d'automatisations sur [socratemobile.fr](https://socratemobile.fr/integration.html?id=domolink-tuya-oem).
+
+Intégration personnalisée Home Assistant complète avec **panneau latéral au look DomoLink (Glassmorphism)** permettant de connecter, classifier et piloter tous les objets connectés issus des applications **Tuya en marque blanche (OEM)** :
 
 * 🛒 **Thank's (GiFi)** (`thanksapp`)
 * 🛒 **Lidl Home (Silvercrest)** (`lidlhomesmart`)
@@ -15,49 +15,34 @@ Intégration personnalisée Home Assistant permettant de connecter et piloter di
 * 🛒 **Nedis SmartLife** (`nedissmartlife`)
 * 🛒 **Calex Smart** (`calexsmartsmart`)
 * 🛒 **Konyks** (`konyks`)
-* 🌐 **Smart Life** / **Tuya Smart**
+* 🌐 **Smart Life** / **Tuya Smart (Officiel)**
 * ⚙️ **Autre marque OEM personnalisée** (saisie directe du schéma et des clés)
 
 ---
 
-## 🌟 Fonctionnalités
+## 🌟 Nouveautés majeures de la Version 2.0.0
 
-* **Multi-Comptes & Multi-Marques :** Ajoutez autant de comptes et d'enseignes que vous le souhaitez (ex: un compte Thank's GiFi ET un compte Lidl Home en parallèle).
-* **Clés Pré-configurées :** Les clés de signature (`client_id`, `secret`, `schema`) ont été rétro-ingéniées directement depuis les applications officielles et sont intégrées dans le code. Vous n'avez qu'à entrer vos identifiants mobiles (email / mot de passe).
-* **Multi-Plateformes :**
-  * **Interrupteurs & Prises (`switch`) :** Prises simples, multiprises avec contrôle individuel des ports, interrupteurs muraux.
-  * **Éclairage (`light`) :** Ampoules et bandeaux LED (ON/OFF, luminosité, température de couleur, couleur RVB).
-  * **Volets & Stores (`cover`) :** Positionnement en pourcentage, montée/descente/arrêt.
-  * **Chauffage & Thermostats (`climate`) :** Consigne de température, température ambiante, modes.
-  * **Capteurs (`sensor`) :** Mesure de puissance (W), tension (V), intensité (mA), énergie consommée (kWh), niveau de batterie (%).
-  * **Capteurs binaires (`binary_sensor`) :** Détecteurs d'ouverture de porte/fenêtre, détecteurs de mouvement (PIR), fuite d'eau, fumée.
-
----
-
-## 🚀 Installation
-
-### Méthode 1 : Copie Manuelle
-1. Copiez le dossier `custom_components/domolink_tuya_oem` dans votre répertoire Home Assistant :
-   ```
-   /config/custom_components/domolink_tuya_oem
-   ```
-2. Redémarrez Home Assistant.
-
-### Méthode 2 : Via HACS (Dépôt personnalisé)
-1. Dans HACS, cliquez sur les 3 points en haut à droite > **Dépôts personnalisés**.
-2. Ajoutez l'URL du dépôt et choisissez la catégorie **Intégration**.
-3. Téléchargez l'intégration et redémarrez Home Assistant.
+* **✨ Panneau Latéral DomoLink intégré :**
+  * Accès direct depuis la barre latérale de Home Assistant.
+  * **Onglet Appareils** : affichage par type de produit avec les photos officielles Tuya, état de connexion (🟢 En ligne / 🔴 Hors ligne / ⚡ Contrôle Local LAN), interrupteurs, variateurs de luminosité, température de blanc Kelvin, sélecteur de couleur RVB et retour de télémétrie en direct.
+  * **Inspecteur de DataPoints (DPs)** : visualisez et testez n'importe quel DP brut ou décodé en un clic.
+  * **Onglet Paramètres & Comptes** : connectez ou supprimez des comptes directement depuis le panneau, renommez les appareils, forcez les types de matériel et lancez un scan réseau local LAN.
+* **📹 Plateforme Caméra (`camera`) :**
+  * Support des flux vidéo en direct (RTSP / HLS), snapshots et alertes mouvements.
+  * Commandes dédiées : activation du mode privé, sensibilité et suivi de mouvement.
+* **🧠 Moteur de classification & décodage universel des DPs (`dp_registry.py`) :**
+  * Détection automatique fiable entre ampoules, prises, caméras, capteurs et thermostats.
+  * Résolution des conflits de DPs numériques (ex: DP 20 bool switch vs int voltage).
+  * Encodage/décodage de couleur HSV bidirectionnel (protocoles 12 et 14 caractères hex).
+* **📶 Suivi de connectivité :**
+  * Création automatique d'une entité binaire `Connectivité` pour chaque appareil.
 
 ---
 
-## ⚙️ Configuration
+## 🚀 Installation & Mise à jour
 
-1. Dans Home Assistant, allez dans **Paramètres > Appareils et services > Ajouter une intégration**.
-2. Recherchez **DomoLink Tuya OEM Multi-Brand**.
-3. Choisissez le mode d'intégration souhaité :
-   * 📱 **Connexion Mobile Smartphone (Recommandé) :** Saisissez simplement l'enseigne (**Thank's GiFi**, **Smart Life**, **Lidl Home**, etc.), votre **email** et votre **mot de passe** de l'application. Vos appareils et leurs clés locales sont importés automatiquement sans aucun compte développeur !
-   * ⚡ **Contrôle Local LAN (100% Hors-Ligne) :** Découverte réseau automatique de vos appareils et pilotage direct via leur `local_key`.
-   * ☁️ **Mode Cloud Développeur Tuya :** Pour les projets avancés via les clés d'API `iot.tuya.com`.
-4. Validez : vos équipements sont automatiquement découverts et créés !
-
-Pour ajouter une autre enseigne ou un deuxième compte (ex: un compte Thank's GiFi ET un compte Lidl Home), répétez simplement l'opération.
+### Via HACS (Dépôt personnalisé)
+1. Dans HACS, ouvrez **DomoLink Tuya OEM Multi-Brand**.
+2. Téléchargez ou mettez à jour vers la version **v2.0.0**.
+3. Redémarrez Home Assistant.
+4. Le panneau **DomoLink Tuya** apparaîtra immédiatement dans la barre latérale gauche !
