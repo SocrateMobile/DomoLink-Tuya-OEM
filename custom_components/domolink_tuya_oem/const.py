@@ -80,6 +80,8 @@ OEM_PROFILES = {
         "client_id": _d("EIT4AIU_wQGH!1$GA$@QD=Iy2"),
         "secret": _d("X>B8IH*G8~DK|83X(}>lB5fl%Ep9X-Fd{i9Z(?pe"),
         "cert_sha256": _d("9v^BPY#eB9Vq+U`7-}3F8y;_LV`3R%Vs335X&7u{XlZI<8yjkCY-1l{9&2J8Vrm;}A8l!392sk4Z)s_2"),
+        "app_key": _d("X(MhoEN?0?A}A^%DKsNAZa-opKRrETZ8s@xX+0uo"),
+        "app_version": "3.1.1",
         "endpoint": "https://openapi.tuyaeu.com",
         "mobile_endpoint": "https://a1.tuyaeu.com/api.json",
         "icon": "mdi:tag-outline",

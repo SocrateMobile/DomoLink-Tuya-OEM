@@ -335,19 +335,28 @@ class TuyaOEMMobileClient:
                 app_key=profile_data.get("app_key", profile_data["client_id"]),
                 package=profile_data["package"],
                 app_version=profile_data.get("app_version", "3.1.1"),
-                ttid=f"sdk_international@{profile_data['client_id']}",
+                ttid=profile_data.get("ttid", f"sdk_international@{profile_data['client_id']}"),
                 sdk_version="5.24.0",
                 device_core_version="5.17.0",
                 os_system="14",
                 platform="Android",
                 channel="sdk",
-                endpoints=("https://a1.tuyaeu.com/api.json",),
+                endpoints=profile_data.get(
+                    "endpoints",
+                    (
+                        "https://a1.tuyaeu.com/api.json",
+                        "https://a1.tuyaus.com/api.json",
+                        "https://a1-sg.iotbing.com/api.json",
+                        "https://a1.tuyacn.com/api.json",
+                        "https://a1.tuyain.com/api.json",
+                    ),
+                ),
             )
             client = TuyaPasswordClient(
                 custom_prof,
                 session,
                 username=self.username,
-                endpoint="https://a1.tuyaeu.com/api.json",
+                endpoint=profile_data.get("mobile_endpoint", "https://a1.tuyaeu.com/api.json"),
             )
 
         self._client = client
