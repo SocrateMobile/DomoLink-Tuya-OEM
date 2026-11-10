@@ -9,6 +9,17 @@ import pytest
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 COMPONENT_DIR = os.path.join(REPO_ROOT, "custom_components", "domolink_tuya_oem")
+if COMPONENT_DIR not in sys.path:
+    sys.path.insert(0, COMPONENT_DIR)
+
+# Load dp_schema first
+schema_spec = importlib.util.spec_from_file_location(
+    "dp_schema",
+    os.path.join(COMPONENT_DIR, "dp_schema.py"),
+)
+dp_schema = importlib.util.module_from_spec(schema_spec)
+sys.modules["dp_schema"] = dp_schema
+schema_spec.loader.exec_module(dp_schema)
 
 # Load dp_registry directly without executing __init__.py
 spec = importlib.util.spec_from_file_location(
@@ -37,6 +48,24 @@ tuya_local = importlib.util.module_from_spec(local_spec)
 sys.modules["tuya_local"] = tuya_local
 local_spec.loader.exec_module(tuya_local)
 
+# Load dp_schema
+schema_spec = importlib.util.spec_from_file_location(
+    "dp_schema",
+    os.path.join(COMPONENT_DIR, "dp_schema.py"),
+)
+dp_schema = importlib.util.module_from_spec(schema_spec)
+sys.modules["dp_schema"] = dp_schema
+schema_spec.loader.exec_module(dp_schema)
+
+# Load lan_resolver
+lan_spec = importlib.util.spec_from_file_location(
+    "lan_resolver",
+    os.path.join(COMPONENT_DIR, "lan_resolver.py"),
+)
+lan_resolver = importlib.util.module_from_spec(lan_spec)
+sys.modules["lan_resolver"] = lan_resolver
+lan_spec.loader.exec_module(lan_resolver)
+
 classify_device = dp_registry.classify_device
 resolve_device_icon = dp_registry.resolve_device_icon
 tuya_hsv_to_hs = dp_registry.tuya_hsv_to_hs
@@ -46,7 +75,7 @@ is_private_lan_ip = tuya_api.is_private_lan_ip
 
 
 def test_manifest_structure_and_version():
-    """Verify manifest.json has valid domain, codeowners, and version 2.0.5."""
+    """Verify manifest.json has valid domain, codeowners, and version 2.1.0."""
     manifest_path = os.path.join(COMPONENT_DIR, "manifest.json")
     assert os.path.isfile(manifest_path)
     with open(manifest_path, "r", encoding="utf-8") as f:
@@ -54,9 +83,10 @@ def test_manifest_structure_and_version():
 
     assert manifest["domain"] == "domolink_tuya_oem"
     assert manifest["name"] == "DomoLink Tuya OEM Multi-Brand"
-    assert manifest["version"] == "2.0.5"
+    assert manifest["version"] == "2.1.0"
     assert "@SocrateMobile" in manifest["codeowners"]
     assert "tuya-mobile>=1.2.0" in manifest["requirements"]
+    assert "dhcp" in manifest and len(manifest["dhcp"]) > 0
 
 
 def test_translations_parity():
@@ -348,6 +378,143 @@ def test_tuya_local_device_encrypt_decrypt_roundtrip():
     )
     enc_31 = dev_31._encrypt_payload(payload_dict)
     assert enc_31 == b'{"devId":"bf_switch_cuisine","dps":{"1":true,"2":50}}'
+
+
+def test_dp_schema_parsing_and_coercion():
+    """Verify parsing Tuya product schema with bool, value, enum types and value constraints."""
+    raw_schema = [
+        {
+            "id": 1,
+            "code": "switch_led",
+            "name": "Interrupteur Principal",
+            "mode": "rw",
+            "type": "bool",
+            "property": {},
+        },
+        {
+            "id": 2,
+            "code": "bright_value",
+            "name": "Luminosité",
+            "mode": "rw",
+            "type": "value",
+            "property": {"min": 10, "max": 1000, "scale": 1, "step": 10, "unit": "%"},
+        },
+        {
+            "id": 3,
+            "code": "work_mode",
+            "name": "Mode d'éclairage",
+            "mode": "rw",
+            "type": "enum",
+            "property": {"range": ["white", "colour", "scene", "music"]},
+        },
+        {
+            "id": 4,
+            "code": "temp_current",
+            "name": "Température Ambiante",
+            "mode": "ro",
+            "type": "value",
+            "property": {"min": -200, "max": 600, "scale": 1, "step": 1, "unit": "°C"},
+        },
+    ]
+
+    specs = dp_schema.parse_dp_schema(raw_schema)
+    assert "1" in specs and "switch_led" in specs
+    assert specs["1"].name == "Interrupteur Principal"
+    assert specs["1"].writable is True
+
+    # Check scaled value formatting
+    bright_spec = specs["2"]
+    assert bright_spec.min == 10.0
+    assert bright_spec.max == 1000.0
+    assert bright_spec.scale == 1
+    # raw 500 with scale 1 -> 50.0
+    assert bright_spec.format_value(500) == 50.0
+    # user setting 50.0 -> raw 500
+    assert bright_spec.coerce_to_raw(50.0) == 500
+    # clamp out of bounds (> 1000)
+    assert bright_spec.coerce_to_raw(150.0) == 1000
+    # clamp out of bounds (< 10)
+    assert bright_spec.coerce_to_raw(0.0) == 10
+
+    # Enum
+    mode_spec = specs["3"]
+    assert mode_spec.dp_type == "enum"
+    assert "scene" in mode_spec.range_options
+    assert mode_spec.coerce_to_raw("SCENE") == "scene"  # Case-insensitive recovery
+
+    # Read-only
+    temp_spec = specs["4"]
+    assert temp_spec.writable is False
+    assert temp_spec.readable is True
+
+
+def test_parse_device_capabilities_with_schema():
+    """Verify parse_device_capabilities prioritizes official product schema over hardcoded rules."""
+    dev_data = {
+        "id": "bf_light_schema_test",
+        "name": "Lampe Test",
+        "category": "dj",
+        "dps_status": {"1": True, "2": 800, "3": "colour"},
+        "schema_info": [
+            {
+                "id": 1,
+                "code": "switch_led",
+                "name": "Alimentation Plafonnier",
+                "mode": "rw",
+                "type": "bool",
+            },
+            {
+                "id": 2,
+                "code": "bright_value",
+                "name": "Intensité",
+                "mode": "rw",
+                "type": "value",
+                "property": {"min": 10, "max": 1000, "scale": 1, "unit": "%"},
+            },
+            {
+                "id": 3,
+                "code": "work_mode",
+                "name": "Ambiance",
+                "mode": "rw",
+                "type": "enum",
+                "property": {"range": ["white", "colour"]},
+            },
+        ],
+    }
+
+    caps = parse_device_capabilities(dev_data)
+    assert caps["device_type"] == "light"
+    parsed_dps = caps["parsed_dps"]
+    assert "1" in parsed_dps
+    assert parsed_dps["1"].name == "Alimentation Plafonnier"
+    assert parsed_dps["2"].name == "Intensité"
+    assert parsed_dps["2"].value == 80.0  # scaled
+    assert parsed_dps["3"].name == "Ambiance"
+    assert "schema_specs" in caps
+
+
+def test_lan_resolver_normalize_mac():
+    """Verify MAC normalization handles various formats."""
+    assert lan_resolver.normalize_mac("D8:F1:5B:12:34:56") == "d8f15b123456"
+    assert lan_resolver.normalize_mac("d8-f1-5b-12-34-56") == "d8f15b123456"
+    assert lan_resolver.normalize_mac("D8F15B123456") == "d8f15b123456"
+    assert lan_resolver.normalize_mac("") == ""
+    assert lan_resolver.normalize_mac(None) == ""
+
+
+def test_platforms_include_number_and_select():
+    """Verify const.py defines number and select platforms for schema DPs."""
+    const_spec = importlib.util.spec_from_file_location(
+        "const",
+        os.path.join(COMPONENT_DIR, "const.py"),
+    )
+    const = importlib.util.module_from_spec(const_spec)
+    const_spec.loader.exec_module(const)
+    assert "number" in const.PLATFORMS
+    assert "select" in const.PLATFORMS
+    assert const.VERSION == "2.1.0"
+
+
 
 
 

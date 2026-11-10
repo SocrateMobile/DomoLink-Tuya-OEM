@@ -13,6 +13,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .const import DEFAULT_SCAN_INTERVAL, DOMAIN
 from .dp_registry import parse_device_capabilities
+from .lan_resolver import LanResolver
 from .tuya_api import TuyaOEMClient, TuyaOEMError, TuyaOEMMobileClient, is_private_lan_ip
 from .tuya_local import TuyaLocalDevice, TuyaLocalDiscoveryListener, async_discover_devices
 
@@ -50,73 +51,33 @@ class TuyaOEMDataCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._store = Store[dict[str, Any]](hass, STORAGE_VERSION, STORAGE_KEY)
         self.overrides: dict[str, Any] = {}
         self._overrides_loaded = False
-        self._listener: TuyaLocalDiscoveryListener | None = None
+        self.lan_resolver = LanResolver(self)
 
         if local_device:
             self.local_devices[local_device.device_id] = local_device
 
     def _handle_local_device_discovered(self, dev_id: str, ip: str, version: str) -> None:
         """Handle device detected via UDP broadcast and automatically bind local LAN."""
-        if not is_private_lan_ip(ip):
-            return
-
-        dev = self.devices.get(dev_id)
+        dev = self.devices.get(dev_id) or self.data.get(dev_id)
         if not dev:
             return
-
         local_key = dev.get("local_key")
         if not local_key:
             return
-
-        current_local = self.local_devices.get(dev_id)
-        if current_local is None or current_local.ip != ip:
-            _LOGGER.info(
-                "Liaison locale automatique active pour %s (%s, IP: %s, ver: %s)",
-                dev.get("name", dev_id),
-                dev_id,
-                ip,
-                version,
-            )
-            self.local_devices[dev_id] = TuyaLocalDevice(
-                device_id=dev_id,
-                ip=ip,
-                local_key=local_key,
-                version=version,
-            )
-            dev["ip"] = ip
-            dev["lan_active"] = True
-            if self.data and dev_id in self.data:
-                self.data[dev_id]["ip"] = ip
-                self.data[dev_id]["lan_active"] = True
-                self.async_set_updated_data(self.data)
-
-            if self.hass:
-                self.hass.async_create_task(self.async_save_device_override(dev_id, {"ip": ip}))
+        self.lan_resolver._bind_device(dev_id, ip, local_key, version=version, method="udp")
 
     async def async_start_local_discovery(self) -> None:
-        """Start UDP listener and scan LAN to auto-bind local devices."""
-        if self._listener is None and self.hass:
-            self._listener = TuyaLocalDiscoveryListener(
-                self.hass.loop, self._handle_local_device_discovered
-            )
-            self._listener.start()
-        await self.async_auto_bind_lan_devices()
+        """Start UDP listener and run multi-stage cascade LAN resolution."""
+        self.lan_resolver.start_udp_listener()
+        await self.lan_resolver.async_resolve_missing_ips()
 
     async def async_stop_local_discovery(self) -> None:
         """Stop background UDP listener."""
-        if self._listener is not None:
-            self._listener.stop()
-            self._listener = None
+        self.lan_resolver.stop_udp_listener()
 
     async def async_auto_bind_lan_devices(self) -> None:
         """Scan local network to bind any known devices with local keys."""
-        try:
-            discovered = await async_discover_devices(timeout=1.5)
-            for dev_id, info in discovered.items():
-                ip = info.get("ip")
-                ver = info.get("version", "3.3")
-                if ip:
-                    self._handle_local_device_discovered(dev_id, ip, ver)
+        await self.lan_resolver.async_resolve_missing_ips(force=True)
         except Exception as e:
             _LOGGER.debug("Auto bind LAN scan notice: %s", e)
 

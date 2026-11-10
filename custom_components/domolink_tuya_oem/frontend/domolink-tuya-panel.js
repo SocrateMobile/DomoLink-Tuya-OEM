@@ -563,6 +563,15 @@ class DomolinkTuyaPanel extends HTMLElement {
           font-size: 10px;
           font-weight: 700;
         }
+        .cloud-badge {
+          background: rgba(59, 130, 246, 0.15);
+          color: #60a5fa;
+          border: 1px solid rgba(59, 130, 246, 0.3);
+          border-radius: 4px;
+          padding: 1px 5px;
+          font-size: 10px;
+          font-weight: 700;
+        }
 
         /* Controls Section */
         .controls-box {
@@ -1006,7 +1015,7 @@ class DomolinkTuyaPanel extends HTMLElement {
             <div class="device-sub">
               <span class="brand-badge">${this._escapeHtml(dev.brand_name)}</span>
               <div class="status-dot ${dev.online ? "online" : "offline"}" title="${dev.online ? "En ligne" : "Hors ligne"}"></div>
-              ${dev.lan_active ? `<span class="lan-badge">⚡ LAN</span>` : ""}
+              ${dev.lan_active ? `<span class="lan-badge" title="Mode LAN local actif via ${this._escapeHtml(dev.lan_method || 'LAN')} (${this._escapeHtml(dev.ip || '')})">⚡ LAN · ${this._escapeHtml(dev.ip || '')}</span>` : `<span class="cloud-badge" title="Connecté via Cloud Tuya">☁️ Cloud</span>`}
             </div>
           </div>
         </div>
@@ -1028,18 +1037,48 @@ class DomolinkTuyaPanel extends HTMLElement {
               <thead>
                 <tr>
                   <th>ID</th>
-                  <th>Nom</th>
-                  <th>Valeur</th>
+                  <th>Nom / Type</th>
+                  <th>Valeur / Contrôle</th>
                 </tr>
               </thead>
               <tbody>
-                ${Object.entries(parsedDps).map(([dpId, p]) => `
-                  <tr>
-                    <td class="dp-code">${dpId}</td>
-                    <td>${this._escapeHtml(p.name || p.code || dpId)}</td>
-                    <td style="font-weight: 600;">${this._escapeHtml(String(p.value))} ${p.unit || ""}</td>
-                  </tr>
-                `).join("")}
+                ${Object.entries(parsedDps).map(([dpId, p]) => {
+                  let controlHtml = "";
+                  if (p.writable && p.type === "bool") {
+                    controlHtml = `
+                      <label class="toggle-switch" style="transform: scale(0.75); transform-origin: left center;">
+                        <input type="checkbox" class="ctrl-dp-bool" data-dev-id="${dev.id}" data-dp="${dpId}" ${p.value ? "checked" : ""} />
+                        <span class="slider-round"></span>
+                      </label>
+                    `;
+                  } else if (p.writable && p.type === "enum" && p.options && p.options.length > 0) {
+                    controlHtml = `
+                      <select class="form-select ctrl-dp-enum" data-dev-id="${dev.id}" data-dp="${dpId}" style="padding: 2px 6px; font-size: 11px;">
+                        ${p.options.map(opt => `<option value="${this._escapeHtml(opt)}" ${String(p.value) === String(opt) ? "selected" : ""}>${this._escapeHtml(opt)}</option>`).join("")}
+                      </select>
+                    `;
+                  } else if (p.writable && p.type === "value" && p.min_val !== null && p.max_val !== null) {
+                    controlHtml = `
+                      <div style="display: flex; align-items: center; gap: 6px;">
+                        <input type="range" min="${p.min_val}" max="${p.max_val}" step="${p.step || 1}" value="${p.value || 0}" class="range-slider ctrl-dp-value" data-dev-id="${dev.id}" data-dp="${dpId}" style="width: 80px;" />
+                        <span style="font-size: 11px; font-weight: 600;">${this._escapeHtml(String(p.value))} ${p.unit || ""}</span>
+                      </div>
+                    `;
+                  } else {
+                    controlHtml = `<span style="font-weight: 600;">${this._escapeHtml(String(p.value))} ${p.unit || ""}</span>`;
+                  }
+
+                  return `
+                    <tr>
+                      <td class="dp-code">${dpId}</td>
+                      <td>
+                        <div style="font-size: 11px; font-weight: 500;">${this._escapeHtml(p.name || p.code || dpId)}</div>
+                        <div style="font-size: 9px; color: #8b949e;">${this._escapeHtml(p.type)}${p.writable ? "" : " (lecture seule)"}</div>
+                      </td>
+                      <td>${controlHtml}</td>
+                    </tr>
+                  `;
+                }).join("")}
               </tbody>
             </table>
           ` : ""}
@@ -1492,6 +1531,25 @@ class DomolinkTuyaPanel extends HTMLElement {
     root.querySelectorAll(".ctrl-cam-motion").forEach((chk) => {
       chk.onchange = () => {
         this._sendRawDp(chk.dataset.devId, "134", chk.checked);
+      };
+    });
+
+    // DP Inspector Dynamic Controls
+    root.querySelectorAll(".ctrl-dp-bool").forEach((chk) => {
+      chk.onchange = () => {
+        this._sendRawDp(chk.dataset.devId, chk.dataset.dp, chk.checked);
+      };
+    });
+
+    root.querySelectorAll(".ctrl-dp-enum").forEach((sel) => {
+      sel.onchange = () => {
+        this._sendRawDp(sel.dataset.devId, sel.dataset.dp, sel.value);
+      };
+    });
+
+    root.querySelectorAll(".ctrl-dp-value").forEach((rng) => {
+      rng.onchange = () => {
+        this._sendRawDp(rng.dataset.devId, rng.dataset.dp, Number(rng.value));
       };
     });
   }

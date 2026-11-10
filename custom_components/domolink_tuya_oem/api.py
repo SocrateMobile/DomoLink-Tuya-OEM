@@ -85,12 +85,18 @@ async def ws_get_dashboard(
                         "value": pd.value,
                         "unit": pd.unit,
                         "scale": pd.scale,
+                        "writable": getattr(pd, "writable", True),
+                        "min_val": getattr(pd, "min_val", None),
+                        "max_val": getattr(pd, "max_val", None),
+                        "step": getattr(pd, "step", None),
+                        "options": getattr(pd, "options", None),
                     }
                 elif isinstance(pd, dict):
                     parsed_dps_json[dp_id] = pd
 
             is_cam = (caps.get("device_type") == "camera" or dev.get("device_type") == "camera" or dev.get("category") == "sp")
             linked_cam = coordinator.find_linked_camera_entity(dev_id, caps.get("name") or dev.get("name") or "") if is_cam else None
+            lan_info = coordinator.lan_resolver.get_device_lan_info(dev_id) if hasattr(coordinator, "lan_resolver") else {}
 
             devices.append({
                 "id": dev_id,
@@ -102,6 +108,7 @@ async def ws_get_dashboard(
                 "icon_url": dev.get("icon_url") or "",
                 "online": is_online,
                 "lan_active": is_lan,
+                "lan_method": lan_info.get("method", "udp" if is_lan else "none"),
                 "ip": dev.get("ip") or "",
                 "wan_ip": dev.get("wan_ip") or "",
                 "rtsp_url": coordinator.overrides.get(dev_id, {}).get("rtsp_url") or dev.get("rtsp_url") or "",

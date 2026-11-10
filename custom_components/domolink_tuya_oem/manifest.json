@@ -14,5 +14,15 @@
   "requirements": [
     "tuya-mobile>=1.2.0"
   ],
-  "version": "2.0.5"
+  "dhcp": [
+    {"macaddress": "D8F15B*"},
+    {"macaddress": "10D561*"},
+    {"macaddress": "7CF666*"},
+    {"macaddress": "A09208*"},
+    {"macaddress": "84F3EB*"},
+    {"macaddress": "68572D*"},
+    {"macaddress": "508A06*"},
+    {"macaddress": "2462AB*"}
+  ],
+  "version": "2.1.0"
 }

@@ -5,6 +5,11 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
+try:
+    from .dp_schema import DPSpec, parse_dp_schema
+except (ImportError, ValueError):
+    from dp_schema import DPSpec, parse_dp_schema
+
 _LOGGER = logging.getLogger(__name__)
 
 # Tuya Cloud image CDN base
@@ -98,6 +103,7 @@ class ParsedDP:
     min_val: float | None = None
     max_val: float | None = None
     scale: float = 1.0
+    step: float | None = None
     options: list[str] | None = None
 
 
@@ -193,10 +199,34 @@ def parse_device_capabilities(dev_data: dict[str, Any], user_overrides: dict[str
         is_online = dev_data.get("cloudOnline", True)
     is_online = bool(is_online)
 
+    schema_specs = parse_dp_schema(
+        dev_data.get("schema_info") or dev_data.get("schema"),
+        dp_names=dev_data.get("dp_names"),
+    )
+
     parsed_dps: dict[str, ParsedDP] = {}
     for code, val in dps.items():
         code_str = str(code)
-        parsed_dps[code_str] = _parse_single_dp(code_str, val, dev_type)
+        spec = schema_specs.get(code_str)
+        if spec:
+            scaled_val = spec.format_value(val)
+            parsed_dps[code_str] = ParsedDP(
+                dp_id=code_str,
+                code=spec.code,
+                name=spec.name,
+                dp_type=spec.dp_type,
+                value=scaled_val,
+                raw_value=val,
+                writable=spec.writable,
+                unit=spec.unit,
+                min_val=spec.min,
+                max_val=spec.max,
+                step=spec.step,
+                scale=10**spec.scale if spec.scale > 0 else 1.0,
+                options=spec.range_options if spec.range_options else None,
+            )
+        else:
+            parsed_dps[code_str] = _parse_single_dp(code_str, val, dev_type)
 
     # Lighting capabilities
     light_caps: dict[str, Any] = {}
@@ -220,6 +250,7 @@ def parse_device_capabilities(dev_data: dict[str, Any], user_overrides: dict[str
         "local_key": dev_data.get("local_key") or "",
         "parsed_dps": parsed_dps,
         "raw_dps": dps,
+        "schema_specs": schema_specs,
         "light_caps": light_caps,
         "camera_caps": camera_caps,
     }
