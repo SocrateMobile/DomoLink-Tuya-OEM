@@ -503,6 +503,7 @@ class TuyaOEMMobileClient:
                                                 "devId": dev_id,
                                                 "name": obj.get("name") or obj.get("customName") or obj.get("devName") or f"Appareil {dev_id[:6]}",
                                                 "local_key": obj.get("localKey") or obj.get("local_key") or obj.get("secKey"),
+                                                "protocol_version": str(obj.get("pv") or obj.get("protocolVersion") or obj.get("version") or "3.3"),
                                                 "ip": clean_lan,
                                                 "wan_ip": clean_wan,
                                                 "mac": obj.get("mac") or obj.get("macAddress"),
@@ -521,21 +522,31 @@ class TuyaOEMMobileClient:
             except Exception as e:
                 _LOGGER.debug("Direct mobile device traversal failed (tentative %d): %s", attempt + 1, e)
 
-            # 2. Second approach: fallback to get_local_keys
-            if not discovered:
+            # 2. Enrich missing local keys or fallback to get_local_keys
+            missing_local_keys = not discovered or any(not d.get("local_key") for d in discovered.values())
+            if missing_local_keys:
                 try:
                     records = await self._client.get_local_keys([])
                     for r in records:
                         dev_id = r.get("device_id")
-                        if dev_id and dev_id not in discovered:
-                            raw_ip = r.get("ip")
-                            clean_lan = raw_ip if is_private_lan_ip(raw_ip) else None
-                            clean_wan = raw_ip if (raw_ip and not clean_lan) else None
+                        if not dev_id:
+                            continue
+                        raw_ip = r.get("ip")
+                        clean_lan = raw_ip if is_private_lan_ip(raw_ip) else None
+                        clean_wan = raw_ip if (raw_ip and not clean_lan) else None
+
+                        if dev_id in discovered:
+                            if not discovered[dev_id].get("local_key") and r.get("local_key"):
+                                discovered[dev_id]["local_key"] = r["local_key"]
+                            if not discovered[dev_id].get("ip") and clean_lan:
+                                discovered[dev_id]["ip"] = clean_lan
+                        else:
                             discovered[dev_id] = {
                                 "id": dev_id,
                                 "devId": dev_id,
                                 "name": r.get("name", f"Appareil {dev_id[:6]}"),
                                 "local_key": r.get("local_key"),
+                                "protocol_version": str(r.get("protocol_version") or "3.3"),
                                 "ip": clean_lan,
                                 "wan_ip": clean_wan,
                                 "uuid": r.get("uuid"),
@@ -545,7 +556,7 @@ class TuyaOEMMobileClient:
                                 "dps": {},
                             }
                 except Exception as e:
-                    _LOGGER.debug("get_local_keys fallback: %s", e)
+                    _LOGGER.debug("get_local_keys enrichment: %s", e)
 
             if discovered:
                 self.devices = list(discovered.values())

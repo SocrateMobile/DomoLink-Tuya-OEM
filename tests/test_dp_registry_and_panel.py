@@ -28,6 +28,15 @@ tuya_api = importlib.util.module_from_spec(api_spec)
 sys.modules["tuya_api"] = tuya_api
 api_spec.loader.exec_module(tuya_api)
 
+# Load tuya_local
+local_spec = importlib.util.spec_from_file_location(
+    "tuya_local",
+    os.path.join(COMPONENT_DIR, "tuya_local.py"),
+)
+tuya_local = importlib.util.module_from_spec(local_spec)
+sys.modules["tuya_local"] = tuya_local
+local_spec.loader.exec_module(tuya_local)
+
 classify_device = dp_registry.classify_device
 resolve_device_icon = dp_registry.resolve_device_icon
 tuya_hsv_to_hs = dp_registry.tuya_hsv_to_hs
@@ -37,7 +46,7 @@ is_private_lan_ip = tuya_api.is_private_lan_ip
 
 
 def test_manifest_structure_and_version():
-    """Verify manifest.json has valid domain, codeowners, and version 2.0.4."""
+    """Verify manifest.json has valid domain, codeowners, and version 2.0.5."""
     manifest_path = os.path.join(COMPONENT_DIR, "manifest.json")
     assert os.path.isfile(manifest_path)
     with open(manifest_path, "r", encoding="utf-8") as f:
@@ -45,7 +54,7 @@ def test_manifest_structure_and_version():
 
     assert manifest["domain"] == "domolink_tuya_oem"
     assert manifest["name"] == "DomoLink Tuya OEM Multi-Brand"
-    assert manifest["version"] == "2.0.4"
+    assert manifest["version"] == "2.0.5"
     assert "@SocrateMobile" in manifest["codeowners"]
     assert "tuya-mobile>=1.2.0" in manifest["requirements"]
 
@@ -292,5 +301,53 @@ def test_panel_contains_online_offline_filter_toggles():
     assert "stat-filter-offline" in code
     assert "_showOnline" in code
     assert "_showOffline" in code
+
+
+def test_udp_discovery_packet_decode():
+    """Verify decrypt_udp_packet handles raw JSON (port 6666) and AES-128-ECB (port 6667)."""
+    # 1. Raw JSON (protocol 3.1 UDP broadcast on port 6666)
+    raw_json = b'{"ip":"192.168.1.42","gwId":"bf_device_test_1","active":2,"ablilty":0,"mode":0,"encrypt":true,"productKey":"key123","version":"3.1"}'
+    parsed = tuya_local.decrypt_udp_packet(raw_json)
+    assert parsed is not None
+    assert parsed["ip"] == "192.168.1.42"
+    assert parsed["gwId"] == "bf_device_test_1"
+    assert parsed["version"] == "3.1"
+
+    # 2. Invalid or too short packet
+    assert tuya_local.decrypt_udp_packet(b"too_short") is None
+
+
+def test_tuya_local_device_encrypt_decrypt_roundtrip():
+    """Verify TuyaLocalDevice encryption and decryption roundtrip for protocol 3.3 and 3.1."""
+    dev_33 = tuya_local.TuyaLocalDevice(
+        device_id="bf_switch_cuisine",
+        ip="192.168.1.80",
+        local_key="1234567890123456",
+        version="3.3",
+    )
+    payload_dict = {"devId": "bf_switch_cuisine", "dps": {"1": True, "2": 50}}
+    enc = dev_33._encrypt_payload(payload_dict)
+    assert enc.startswith(b"3.3")
+
+    # Pack into Tuya binary frame
+    frame = dev_33._pack_message(0x07, enc)
+    assert len(frame) > 30
+
+    # Decrypt
+    decrypted = dev_33._decrypt_payload(frame)
+    assert decrypted is not None
+    assert decrypted.get("devId") == "bf_switch_cuisine"
+    assert decrypted.get("dps") == {"1": True, "2": 50}
+
+    # Protocol 3.1
+    dev_31 = tuya_local.TuyaLocalDevice(
+        device_id="bf_switch_31",
+        ip="192.168.1.81",
+        local_key="1234567890123456",
+        version="3.1",
+    )
+    enc_31 = dev_31._encrypt_payload(payload_dict)
+    assert enc_31 == b'{"devId":"bf_switch_cuisine","dps":{"1":true,"2":50}}'
+
 
 

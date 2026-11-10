@@ -232,6 +232,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unload_ok:
         entry_data = hass.data[DOMAIN].pop(entry.entry_id, None)
         if entry_data:
+            if "coordinator" in entry_data and entry_data["coordinator"]:
+                await entry_data["coordinator"].async_stop_local_discovery()
             if "client" in entry_data and entry_data["client"]:
                 await entry_data["client"].close()
             if "mobile_client" in entry_data and entry_data["mobile_client"]:

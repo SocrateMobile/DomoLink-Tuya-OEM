@@ -14,7 +14,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .const import DEFAULT_SCAN_INTERVAL, DOMAIN
 from .dp_registry import parse_device_capabilities
 from .tuya_api import TuyaOEMClient, TuyaOEMError, TuyaOEMMobileClient, is_private_lan_ip
-from .tuya_local import TuyaLocalDevice
+from .tuya_local import TuyaLocalDevice, TuyaLocalDiscoveryListener, async_discover_devices
 
 _LOGGER = logging.getLogger(__name__)
 STORAGE_VERSION = 1
@@ -50,9 +50,75 @@ class TuyaOEMDataCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._store = Store[dict[str, Any]](hass, STORAGE_VERSION, STORAGE_KEY)
         self.overrides: dict[str, Any] = {}
         self._overrides_loaded = False
+        self._listener: TuyaLocalDiscoveryListener | None = None
 
         if local_device:
             self.local_devices[local_device.device_id] = local_device
+
+    def _handle_local_device_discovered(self, dev_id: str, ip: str, version: str) -> None:
+        """Handle device detected via UDP broadcast and automatically bind local LAN."""
+        if not is_private_lan_ip(ip):
+            return
+
+        dev = self.devices.get(dev_id)
+        if not dev:
+            return
+
+        local_key = dev.get("local_key")
+        if not local_key:
+            return
+
+        current_local = self.local_devices.get(dev_id)
+        if current_local is None or current_local.ip != ip:
+            _LOGGER.info(
+                "Liaison locale automatique active pour %s (%s, IP: %s, ver: %s)",
+                dev.get("name", dev_id),
+                dev_id,
+                ip,
+                version,
+            )
+            self.local_devices[dev_id] = TuyaLocalDevice(
+                device_id=dev_id,
+                ip=ip,
+                local_key=local_key,
+                version=version,
+            )
+            dev["ip"] = ip
+            dev["lan_active"] = True
+            if self.data and dev_id in self.data:
+                self.data[dev_id]["ip"] = ip
+                self.data[dev_id]["lan_active"] = True
+                self.async_set_updated_data(self.data)
+
+            if self.hass:
+                self.hass.async_create_task(self.async_save_device_override(dev_id, {"ip": ip}))
+
+    async def async_start_local_discovery(self) -> None:
+        """Start UDP listener and scan LAN to auto-bind local devices."""
+        if self._listener is None and self.hass:
+            self._listener = TuyaLocalDiscoveryListener(
+                self.hass.loop, self._handle_local_device_discovered
+            )
+            self._listener.start()
+        await self.async_auto_bind_lan_devices()
+
+    async def async_stop_local_discovery(self) -> None:
+        """Stop background UDP listener."""
+        if self._listener is not None:
+            self._listener.stop()
+            self._listener = None
+
+    async def async_auto_bind_lan_devices(self) -> None:
+        """Scan local network to bind any known devices with local keys."""
+        try:
+            discovered = await async_discover_devices(timeout=1.5)
+            for dev_id, info in discovered.items():
+                ip = info.get("ip")
+                ver = info.get("version", "3.3")
+                if ip:
+                    self._handle_local_device_discovered(dev_id, ip, ver)
+        except Exception as e:
+            _LOGGER.debug("Auto bind LAN scan notice: %s", e)
 
     async def _async_ensure_overrides(self) -> None:
         """Load persistent user overrides from disk."""
@@ -113,6 +179,10 @@ class TuyaOEMDataCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         """Fetch latest device states (Local LAN, Mobile Cloud or Developer Cloud)."""
         await self._async_ensure_overrides()
 
+        # Start discovery listener once in background if not already started
+        if self._listener is None and self.hass:
+            self.hass.async_create_task(self.async_start_local_discovery())
+
         # --- 1. SINGLE LOCAL LAN MODE ---
         if self.local_device and not self.mobile_client and not self.client:
             try:
@@ -150,6 +220,7 @@ class TuyaOEMDataCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                     return self.devices
 
                 devices_map: dict[str, dict[str, Any]] = {}
+                raw_devices: list[dict[str, Any]] = []
 
                 for dev in device_list:
                     dev_id = dev.get("id") or dev.get("devId") or dev.get("device_id")
@@ -163,34 +234,47 @@ class TuyaOEMDataCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                     if dev_overrides.get("rtsp_url"):
                         dev["rtsp_url"] = dev_overrides["rtsp_url"]
 
-                    # Register or update local device ONLY if valid private LAN IP and local_key
+                    # Register or update local device if valid private LAN IP and local_key
                     local_key = dev.get("local_key")
                     ip = dev.get("ip")
-                    if local_key and ip and is_private_lan_ip(ip) and dev_id not in self.local_devices:
-                        try:
-                            self.local_devices[dev_id] = TuyaLocalDevice(
-                                device_id=dev_id,
-                                ip=ip,
-                                local_key=local_key,
-                            )
-                        except Exception as e:
-                            _LOGGER.debug("Could not init local client for %s: %s", dev_id, e)
+                    proto_ver = str(dev.get("protocol_version") or "3.3")
 
-                    # Poll status: use fresh dps from get_devices(), optionally refresh via LAN
+                    if local_key and ip and is_private_lan_ip(ip):
+                        current_local = self.local_devices.get(dev_id)
+                        if current_local is None or current_local.ip != ip:
+                            try:
+                                self.local_devices[dev_id] = TuyaLocalDevice(
+                                    device_id=dev_id,
+                                    ip=ip,
+                                    local_key=local_key,
+                                    version=proto_ver,
+                                )
+                            except Exception as e:
+                                _LOGGER.debug("Could not init local client for %s: %s", dev_id, e)
+
+                    raw_devices.append(dev)
+
+                # Parallel local polling for all active local devices
+                local_results: dict[str, dict[str, Any]] = {}
+                active_local_ids = [d["id"] for d in raw_devices if d.get("id") in self.local_devices]
+                if active_local_ids:
+                    tasks = [
+                        self.local_devices[d_id].async_poll_status()
+                        for d_id in active_local_ids
+                    ]
+                    poll_responses = await asyncio.gather(*tasks, return_exceptions=True)
+                    for d_id, resp in zip(active_local_ids, poll_responses):
+                        if isinstance(resp, dict) and resp:
+                            local_results[d_id] = resp
+
+                for dev in raw_devices:
+                    dev_id = dev["id"]
                     status_dict: dict[str, Any] = dict(dev.get("dps") or {})
                     polled_locally = False
 
-                    if dev_id in self.local_devices:
-                        try:
-                            local_status = await asyncio.wait_for(
-                                self.local_devices[dev_id].async_poll_status(),
-                                timeout=1.2,
-                            )
-                            if local_status:
-                                status_dict.update(local_status)
-                                polled_locally = True
-                        except Exception as local_err:
-                            _LOGGER.debug("Local poll for %s failed (%s), using mobile state", dev_id, local_err)
+                    if dev_id in local_results:
+                        status_dict.update(local_results[dev_id])
+                        polled_locally = True
 
                     dev["dps_status"] = status_dict
                     dev["lan_active"] = polled_locally
