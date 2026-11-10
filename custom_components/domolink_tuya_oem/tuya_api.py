@@ -40,6 +40,10 @@ class TuyaOEMAuthError(TuyaOEMError):
     """Authentication failed."""
 
 
+class TuyaOEMBrandRestrictedError(TuyaOEMError):
+    """OEM mobile gateway authentication is restricted by Tuya for this specific brand."""
+
+
 class TuyaOEMClient:
     """Async API Client for Tuya Cloud OpenAPI."""
 
@@ -406,6 +410,19 @@ class TuyaOEMMobileClient:
             _LOGGER.error("Identifiants mobiles invalides pour %s: %s", self.username, err)
             raise TuyaOEMAuthError(f"Identifiants mobiles incorrects: {err}") from err
         except TuyaMobileError as err:
+            err_msg = str(err)
+            cause_str = str(getattr(err, "__cause__", ""))
+            combined = f"{err_msg} {cause_str}"
+            if (
+                "ILLEGAL_CLIENT_ID" in combined
+                or "TuyaMobileProfileExpired" in str(type(err))
+                or "Invalid client" in combined
+            ):
+                _LOGGER.warning("Accès API mobile verrouillé pour %s (%s): %s", self.brand_key, profile_data.get("name"), err)
+                raise TuyaOEMBrandRestrictedError(
+                    f"L'accès mobile direct pour {profile_data.get('name', self.brand_key)} est verrouillé par Tuya. "
+                    "Conseil : Vos appareils Lidl Silvercrest sont 100% compatibles Tuya et peuvent être appairés directement dans Smart Life ou Tuya Smart pour être synchronisés automatiquement."
+                ) from err
             _LOGGER.error("Erreur passerelle mobile Tuya: %s", err)
             raise TuyaOEMError(f"Erreur passerelle mobile: {err}") from err
         except Exception as err:

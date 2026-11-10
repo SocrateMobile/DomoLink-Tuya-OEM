@@ -42,6 +42,7 @@
     "error": {
       "cannot_connect": "Network connection error.",
       "invalid_auth": "Invalid credentials.",
+      "brand_restricted": "Direct mobile API access for this brand is restricted by Tuya. Tip: Your devices (Lidl Silvercrest...) are 100% Tuya compatible and can be paired directly in Smart Life or Tuya Smart to be imported immediately.",
       "unknown": "An unexpected error occurred."
     },
     "abort": {
