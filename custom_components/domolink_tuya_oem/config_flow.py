@@ -13,23 +13,33 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .const import (
     CONF_BRAND,
     CONF_CLIENT_ID,
+    CONF_COUNTRY_CODE,
     CONF_DEVICE_ID,
     CONF_DEVICE_NAME,
     CONF_ENDPOINT,
     CONF_IP_ADDRESS,
     CONF_LOCAL_KEY,
     CONF_MODE,
+    CONF_PASSWORD,
     CONF_PROTOCOL_VERSION,
     CONF_SCHEMA,
     CONF_SECRET,
+    CONF_USERNAME,
+    DEFAULT_COUNTRY_CODE,
     DEFAULT_ENDPOINT,
     DOMAIN,
     ENDPOINTS,
     MODE_CLOUD,
     MODE_LOCAL,
+    MODE_MOBILE,
     OEM_PROFILES,
 )
-from .tuya_api import TuyaOEMAuthError, TuyaOEMClient, TuyaOEMError
+from .tuya_api import (
+    TuyaOEMAuthError,
+    TuyaOEMClient,
+    TuyaOEMError,
+    TuyaOEMMobileClient,
+)
 from .tuya_local import TuyaLocalDevice, async_discover_devices
 
 _LOGGER = logging.getLogger(__name__)
@@ -47,21 +57,85 @@ class TuyaOEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Handle the initial mode selection step."""
         if user_input is not None:
+            if user_input[CONF_MODE] == MODE_MOBILE:
+                return await self.async_step_mobile()
             if user_input[CONF_MODE] == MODE_LOCAL:
                 return await self.async_step_local_discovery()
             return await self.async_step_cloud()
 
         schema = vol.Schema(
             {
-                vol.Required(CONF_MODE, default=MODE_LOCAL): vol.In(
+                vol.Required(CONF_MODE, default=MODE_MOBILE): vol.In(
                     {
-                        MODE_LOCAL: "Contrôle Local LAN (Recommandé - 100% hors-ligne, sans Cloud)",
+                        MODE_MOBILE: "Connexion Mobile Smartphone (Recommandé - Email + Mot de passe direct, sans compte dev)",
+                        MODE_LOCAL: "Contrôle Local LAN (100% hors-ligne, découverte réseau & local_key)",
                         MODE_CLOUD: "Mode Cloud Tuya Developer (iot.tuya.com)",
                     }
                 ),
             }
         )
         return self.async_show_form(step_id="user", data_schema=schema)
+
+    async def async_step_mobile(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Handle Mobile smartphone login."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            brand = user_input[CONF_BRAND]
+            profile = OEM_PROFILES.get(brand, {})
+            username = user_input[CONF_USERNAME].strip()
+            password = user_input[CONF_PASSWORD]
+            country_code = user_input.get(CONF_COUNTRY_CODE, DEFAULT_COUNTRY_CODE).strip()
+
+            session = async_get_clientsession(self.hass)
+            client = TuyaOEMMobileClient(
+                brand_key=brand,
+                username=username,
+                password=password,
+                country_code=country_code,
+                session=session,
+            )
+
+            try:
+                login_res = await client.login()
+                # Test device discovery and local keys extraction
+                devices = await client.get_devices()
+                _LOGGER.info("Mobile login OK: %d appareil(s) découverts pour %s", len(devices), username)
+            except TuyaOEMAuthError:
+                errors["base"] = "invalid_auth"
+            except TuyaOEMError:
+                errors["base"] = "cannot_connect"
+            except Exception as err:
+                _LOGGER.exception("Unexpected exception during mobile login: %s", err)
+                errors["base"] = "unknown"
+            else:
+                unique_id = f"mobile_{brand}_{username.lower()}"
+                await self.async_set_unique_id(unique_id)
+                self._abort_if_unique_id_configured()
+
+                title = f"{profile.get('name', brand.upper())} Mobile ({username})"
+                config_data = {
+                    CONF_MODE: MODE_MOBILE,
+                    CONF_BRAND: brand,
+                    CONF_USERNAME: username,
+                    CONF_PASSWORD: password,
+                    CONF_COUNTRY_CODE: country_code,
+                    "uid": login_res.get("uid"),
+                }
+                return self.async_create_entry(title=title, data=config_data)
+
+        brand_options = {key: profile["name"] for key, profile in OEM_PROFILES.items()}
+
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_BRAND, default="smartlife"): vol.In(brand_options),
+                vol.Required(CONF_USERNAME): str,
+                vol.Required(CONF_PASSWORD): str,
+                vol.Optional(CONF_COUNTRY_CODE, default=DEFAULT_COUNTRY_CODE): str,
+            }
+        )
+
+        return self.async_show_form(step_id="mobile", data_schema=schema, errors=errors)
 
     async def async_step_local_discovery(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Scan local network and configure a discovered Tuya device."""

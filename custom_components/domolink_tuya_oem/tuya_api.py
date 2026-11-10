@@ -257,3 +257,177 @@ class TuyaOEMClient:
             except Exception as e:
                 _LOGGER.error("Failed to send command to device %s: %s", device_id, e)
                 return False
+
+
+class TuyaOEMMobileClient:
+    """Async client imitating smartphone app connection via Tuya Mobile Gateway."""
+
+    def __init__(
+        self,
+        brand_key: str,
+        username: str,
+        password: str,
+        country_code: str = "33",
+        session: aiohttp.ClientSession | None = None,
+    ) -> None:
+        """Initialize mobile client."""
+        self.brand_key = brand_key
+        self.username = username.strip()
+        self.password = password
+        self.country_code = country_code.strip()
+        self._session = session
+        self._own_session = False
+        self._client: Any = None
+        self.session_data: Any = None
+        self.devices: list[dict[str, Any]] = []
+
+    async def _get_session(self) -> aiohttp.ClientSession:
+        """Return aiohttp session with proper SSL CA certificates."""
+        if self._session is None or self._session.closed:
+            import certifi
+            import ssl
+
+            ssl_context = ssl.create_default_context(cafile=certifi.where())
+            connector = aiohttp.TCPConnector(ssl=ssl_context)
+            self._session = aiohttp.ClientSession(connector=connector)
+            self._own_session = True
+        return self._session
+
+    async def close(self) -> None:
+        """Close owned session."""
+        if self._own_session and self._session and not self._session.closed:
+            await self._session.close()
+
+    async def login(self) -> dict[str, Any]:
+        """Authenticate user with email and password imitating mobile app."""
+        from tuya_mobile import TuyaMobileApp, TuyaMobileAppProfile, TuyaPasswordClient
+        from tuya_mobile.errors import TuyaMobileError, TuyaMobileInvalidAuth
+
+        from .const import OEM_PROFILES
+
+        session = await self._get_session()
+        profile_data = OEM_PROFILES.get(self.brand_key, OEM_PROFILES["smartlife"])
+
+        if self.brand_key == "tuya":
+            client = TuyaPasswordClient.for_application(
+                TuyaMobileApp.TUYA_SMART,
+                session,
+                username=self.username,
+                endpoint="https://a1.tuyaeu.com/api.json",
+            )
+        elif self.brand_key == "smartlife":
+            client = TuyaPasswordClient.for_application(
+                TuyaMobileApp.SMART_LIFE,
+                session,
+                username=self.username,
+                endpoint="https://a1.tuyaeu.com/api.json",
+            )
+        else:
+            # Custom OEM Profile (Thank's, Lidl, LSC, etc.)
+            custom_prof = TuyaMobileAppProfile(
+                name=profile_data["name"],
+                app_id=profile_data["client_id"],
+                app_secret=profile_data["secret"],
+                cert_sha256_hex=profile_data.get(
+                    "cert_sha256",
+                    "0FC361999CC0C35BA8ACA57DAA5593A20CF55727702EA85AD7B3228949F888FE",
+                ),
+                app_key=profile_data.get("app_key", profile_data["client_id"]),
+                package=profile_data["package"],
+                app_version=profile_data.get("app_version", "3.1.1"),
+                ttid=f"sdk_international@{profile_data['client_id']}",
+                sdk_version="5.24.0",
+                device_core_version="5.17.0",
+                os_system="14",
+                platform="Android",
+                channel="sdk",
+                endpoints=("https://a1.tuyaeu.com/api.json",),
+            )
+            client = TuyaPasswordClient(
+                custom_prof,
+                session,
+                username=self.username,
+                endpoint="https://a1.tuyaeu.com/api.json",
+            )
+
+        self._client = client
+        try:
+            mobile_session = await client.login_with_password(self.password, self.country_code)
+            self.session_data = mobile_session
+            _LOGGER.info(
+                "Connexion Mobile Tuya réussie pour %s (UID: %s, Endpoint: %s)",
+                self.username,
+                mobile_session.uid,
+                mobile_session.endpoint,
+            )
+            return {
+                "uid": mobile_session.uid,
+                "sid": mobile_session.sid,
+                "endpoint": mobile_session.endpoint,
+            }
+        except TuyaMobileInvalidAuth as err:
+            _LOGGER.error("Identifiants mobiles invalides pour %s: %s", self.username, err)
+            raise TuyaOEMAuthError(f"Identifiants mobiles incorrects: {err}") from err
+        except TuyaMobileError as err:
+            _LOGGER.error("Erreur passerelle mobile Tuya: %s", err)
+            raise TuyaOEMError(f"Erreur passerelle mobile: {err}") from err
+        except Exception as err:
+            _LOGGER.exception("Exception inattendue lors de la connexion mobile Tuya: %s", err)
+            raise TuyaOEMError(f"Erreur de connexion mobile: {err}") from err
+
+    async def get_devices(self) -> list[dict[str, Any]]:
+        """Fetch all user devices and their local keys via Mobile session."""
+        if not self._client or not self.session_data:
+            await self.login()
+
+        try:
+            records = await self._client.get_local_keys([])
+            _LOGGER.info("Découverte mobile : %d appareil(s) trouvé(s) avec clé locale", len(records))
+            devices: list[dict[str, Any]] = []
+            for r in records:
+                dev_id = r.get("device_id")
+                devices.append(
+                    {
+                        "id": dev_id,
+                        "devId": dev_id,
+                        "name": r.get("name", f"Appareil {dev_id[:6]}"),
+                        "local_key": r.get("local_key"),
+                        "ip": r.get("ip"),
+                        "uuid": r.get("uuid"),
+                        "online": r.get("is_online", True),
+                        "product_name": f"{self.brand_key.upper()} Device",
+                    }
+                )
+            self.devices = devices
+            return devices
+        except Exception as err:
+            _LOGGER.warning("Impossible d'extraire les clés locales via l'API mobile: %s", err)
+            return self.devices
+
+    async def get_device_status(self, device_id: str) -> dict[str, Any]:
+        """Fetch status of device via mobile API."""
+        if not self._client:
+            await self.login()
+        try:
+            res = await self._client.get_device_status(device_id)
+            dps: dict[str, Any] = {}
+            if isinstance(res, dict):
+                raw_dps = res.get("dps") or res.get("result", {}).get("dps") or {}
+                if isinstance(raw_dps, dict):
+                    return raw_dps
+            return dps
+        except Exception as err:
+            _LOGGER.debug("Could not fetch mobile status for %s: %s", device_id, err)
+            return {}
+
+    async def send_command(self, device_id: str, commands: list[dict[str, Any]]) -> bool:
+        """Send command via mobile API."""
+        if not self._client:
+            await self.login()
+        try:
+            dps_payload = {str(c["code"]): c["value"] for c in commands}
+            await self._client.publish_dps(device_id, dps_payload)
+            return True
+        except Exception as err:
+            _LOGGER.error("Erreur lors de l'envoi de la commande mobile pour %s: %s", device_id, err)
+            return False

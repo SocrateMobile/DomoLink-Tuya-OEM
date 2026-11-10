@@ -8,6 +8,16 @@
           "mode": "Mode d'intégration"
         }
       },
+      "mobile": {
+        "title": "Connexion Mobile Smartphone (Recommandé)",
+        "description": "Connectez-vous directement avec vos identifiants de l'application mobile (Smart Life, Tuya Smart, Thank's GiFi, Lidl Home, etc.). Vos appareils et leurs clés locales seront importés automatiquement.",
+        "data": {
+          "brand": "Marque / Application d'origine",
+          "username": "Email ou Numéro de mobile",
+          "password": "Mot de passe",
+          "country_code": "Indicatif pays (ex: 33)"
+        }
+      },
       "local_discovery": {
         "title": "Contrôle Local LAN (100% Hors-Ligne)",
         "description": "{count} appareil(s) Tuya / OEM détecté(s) sur votre réseau Wi-Fi local. Sélectionnez votre appareil et renseignez sa clé locale (local_key à 16 caractères).",

@@ -54,8 +54,10 @@ Intégration personnalisée Home Assistant permettant de connecter et piloter di
 
 1. Dans Home Assistant, allez dans **Paramètres > Appareils et services > Ajouter une intégration**.
 2. Recherchez **DomoLink Tuya OEM Multi-Brand**.
-3. Choisissez votre enseigne dans la liste déroulante (ex: **Thank's (GiFi)**).
-4. Saisissez votre **email** et votre **mot de passe** de l'application mobile.
-5. Validez : vos équipements sont automatiquement découverts et créés !
+3. Choisissez le mode d'intégration souhaité :
+   * 📱 **Connexion Mobile Smartphone (Recommandé) :** Saisissez simplement l'enseigne (**Thank's GiFi**, **Smart Life**, **Lidl Home**, etc.), votre **email** et votre **mot de passe** de l'application. Vos appareils et leurs clés locales sont importés automatiquement sans aucun compte développeur !
+   * ⚡ **Contrôle Local LAN (100% Hors-Ligne) :** Découverte réseau automatique de vos appareils et pilotage direct via leur `local_key`.
+   * ☁️ **Mode Cloud Développeur Tuya :** Pour les projets avancés via les clés d'API `iot.tuya.com`.
+4. Validez : vos équipements sont automatiquement découverts et créés !
 
-Pour ajouter une autre enseigne ou un deuxième compte, répétez simplement l'opération.
+Pour ajouter une autre enseigne ou un deuxième compte (ex: un compte Thank's GiFi ET un compte Lidl Home), répétez simplement l'opération.
