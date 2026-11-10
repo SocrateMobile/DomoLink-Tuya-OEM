@@ -37,7 +37,7 @@ is_private_lan_ip = tuya_api.is_private_lan_ip
 
 
 def test_manifest_structure_and_version():
-    """Verify manifest.json has valid domain, codeowners, and version 2.0.2."""
+    """Verify manifest.json has valid domain, codeowners, and version 2.0.3."""
     manifest_path = os.path.join(COMPONENT_DIR, "manifest.json")
     assert os.path.isfile(manifest_path)
     with open(manifest_path, "r", encoding="utf-8") as f:
@@ -45,7 +45,7 @@ def test_manifest_structure_and_version():
 
     assert manifest["domain"] == "domolink_tuya_oem"
     assert manifest["name"] == "DomoLink Tuya OEM Multi-Brand"
-    assert manifest["version"] == "2.0.2"
+    assert manifest["version"] == "2.0.3"
     assert "@SocrateMobile" in manifest["codeowners"]
     assert "tuya-mobile>=1.2.0" in manifest["requirements"]
 
@@ -61,6 +61,8 @@ def test_translations_parity():
     with open(en_path, "r", encoding="utf-8") as f:
         en = json.load(f)
     assert "config" in fr and "config" in en
+    assert "brand_restricted" in fr["config"]["error"]
+    assert "brand_restricted" in en["config"]["error"]
 
 
 def test_resolve_device_icon():
@@ -271,3 +273,11 @@ def test_camera_entity_accent_matching():
     assert match("Caméra Rochegude Salon", ha_cams) == "camera.camera_rochegude_salon"
     assert match("Lampe d'extérieur intelligente avec caméra", ha_cams) == "camera.lampe_d_exterieur_intelligente_avec_camera"
     assert match("Caméra Rochegude cuisine", ha_cams) == "camera.camera_rochegude_cuisine"
+
+
+def test_brand_restricted_error_defined():
+    """Verify TuyaOEMBrandRestrictedError is subclass of TuyaOEMError."""
+    assert issubclass(tuya_api.TuyaOEMBrandRestrictedError, tuya_api.TuyaOEMError)
+    err = tuya_api.TuyaOEMBrandRestrictedError("Brand restricted")
+    assert "Brand restricted" in str(err)
+

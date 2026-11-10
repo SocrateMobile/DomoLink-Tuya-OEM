@@ -36,6 +36,7 @@ from .const import (
 )
 from .tuya_api import (
     TuyaOEMAuthError,
+    TuyaOEMBrandRestrictedError,
     TuyaOEMClient,
     TuyaOEMError,
     TuyaOEMMobileClient,
@@ -101,6 +102,9 @@ class TuyaOEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 # Test device discovery and local keys extraction
                 devices = await client.get_devices()
                 _LOGGER.info("Mobile login OK: %d appareil(s) découverts pour %s", len(devices), username)
+            except TuyaOEMBrandRestrictedError as err:
+                _LOGGER.warning("OEM brand restricted mobile access: %s", err)
+                errors["base"] = "brand_restricted"
             except TuyaOEMAuthError:
                 errors["base"] = "invalid_auth"
             except TuyaOEMError:

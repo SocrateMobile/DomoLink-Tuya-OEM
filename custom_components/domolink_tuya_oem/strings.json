@@ -42,6 +42,7 @@
     "error": {
       "cannot_connect": "Échec de connexion réseau.",
       "invalid_auth": "Identifiants invalides.",
+      "brand_restricted": "L'accès API direct pour cette marque est verrouillé par Tuya. Conseil : Vos équipements (Lidl Silvercrest...) sont 100% compatibles Tuya et peuvent être appairés directement dans Smart Life ou Tuya Smart pour être reconnus immédiatement.",
       "unknown": "Une erreur inattendue est survenue."
     },
     "abort": {
