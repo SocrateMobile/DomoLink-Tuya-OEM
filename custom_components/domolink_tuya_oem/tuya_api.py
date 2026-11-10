@@ -389,29 +389,100 @@ class TuyaOEMMobileClient:
         if not self._client or not self.session_data:
             await self.login()
 
+        from tuya_mobile.password_client import _walk
+
+        discovered: dict[str, dict[str, Any]] = {}
+
+        # 1. Query homes and group device lists
         try:
-            records = await self._client.get_local_keys([])
-            _LOGGER.info("Découverte mobile : %d appareil(s) trouvé(s) avec clé locale", len(records))
-            devices: list[dict[str, Any]] = []
-            for r in records:
-                dev_id = r.get("device_id")
-                devices.append(
-                    {
-                        "id": dev_id,
-                        "devId": dev_id,
-                        "name": r.get("name", f"Appareil {dev_id[:6]}"),
-                        "local_key": r.get("local_key"),
-                        "ip": r.get("ip"),
-                        "uuid": r.get("uuid"),
-                        "online": r.get("is_online", True),
-                        "product_name": f"{self.brand_key.upper()} Device",
-                    }
-                )
-            self.devices = devices
-            return devices
-        except Exception as err:
-            _LOGGER.warning("Impossible d'extraire les clés locales via l'API mobile: %s", err)
-            return self.devices
+            home_apis = ["m.life.home.space.list", "tuya.m.home.space.list", "m.life.home.list"]
+            homes_raw = None
+            for api in home_apis:
+                try:
+                    homes_raw = await self._client._call(api, {})
+                    if homes_raw:
+                        break
+                except Exception as e:
+                    _LOGGER.debug("API %s: %s", api, e)
+
+            gids: set[Any] = set()
+            if homes_raw:
+                for obj in _walk(homes_raw):
+                    gid = obj.get("gid") or obj.get("groupId") or obj.get("homeId") or obj.get("id")
+                    if gid and str(gid).isdigit():
+                        gids.add(gid)
+
+            _LOGGER.debug("Group IDs (homes) discovered for %s: %s", self.brand_key, gids)
+
+            device_apis = [
+                ("m.life.my.group.device.list", "2.2"),
+                ("m.life.my.group.device.list", "2.0"),
+                ("thing.m.my.group.device.list", "1.0"),
+                ("tuya.m.my.group.device.list", "1.0"),
+            ]
+
+            target_gids = list(gids) if gids else [0]
+            for gid in target_gids:
+                for api, ver in device_apis:
+                    try:
+                        payload = {"gid": gid, "homeId": gid} if gid else {}
+                        resp = await self._client._call(api, payload, version=ver)
+                        if resp:
+                            for obj in _walk(resp):
+                                dev_id = obj.get("devId") or obj.get("deviceId") or obj.get("id")
+                                if dev_id and isinstance(dev_id, str) and len(dev_id) >= 10:
+                                    if dev_id not in discovered:
+                                        p_bean = obj.get("productBean") or {}
+                                        cat = obj.get("category") or p_bean.get("category") or ""
+                                        p_name = obj.get("productName") or p_bean.get("name") or f"{self.brand_key.upper()} Device"
+                                        dps = obj.get("dps") or {}
+                                        discovered[dev_id] = {
+                                            "id": dev_id,
+                                            "devId": dev_id,
+                                            "name": obj.get("name") or obj.get("customName") or obj.get("devName") or f"Appareil {dev_id[:6]}",
+                                            "local_key": obj.get("localKey") or obj.get("local_key") or obj.get("secKey"),
+                                            "ip": obj.get("ip") or obj.get("lanIp"),
+                                            "uuid": obj.get("uuid"),
+                                            "category": cat,
+                                            "product_name": p_name,
+                                            "product_id": obj.get("productId") or p_bean.get("id"),
+                                            "online": obj.get("isOnline") if "isOnline" in obj else obj.get("cloudOnline", True),
+                                            "dps": dps,
+                                        }
+                    except Exception as dev_err:
+                        _LOGGER.debug("API %s (ver %s, gid %s) error: %s", api, ver, gid, dev_err)
+        except Exception as e:
+            _LOGGER.debug("Direct mobile device traversal failed: %s", e)
+
+        # 2. Second approach: fallback to get_local_keys
+        if not discovered:
+            try:
+                records = await self._client.get_local_keys([])
+                for r in records:
+                    dev_id = r.get("device_id")
+                    if dev_id and dev_id not in discovered:
+                        discovered[dev_id] = {
+                            "id": dev_id,
+                            "devId": dev_id,
+                            "name": r.get("name", f"Appareil {dev_id[:6]}"),
+                            "local_key": r.get("local_key"),
+                            "ip": r.get("ip"),
+                            "uuid": r.get("uuid"),
+                            "online": r.get("is_online", True),
+                            "product_name": f"{self.brand_key.upper()} Device",
+                            "category": "",
+                            "dps": {},
+                        }
+            except Exception as e:
+                _LOGGER.warning("get_local_keys fallback error: %s", e)
+
+        self.devices = list(discovered.values())
+        _LOGGER.info(
+            "Découverte mobile %s : %d appareil(s) trouvé(s)",
+            self.brand_key,
+            len(self.devices),
+        )
+        return self.devices
 
     async def get_device_status(self, device_id: str) -> dict[str, Any]:
         """Fetch status of device via mobile API."""

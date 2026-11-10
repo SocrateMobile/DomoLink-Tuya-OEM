@@ -13,6 +13,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import TuyaOEMDataCoordinator
+from .light import is_light_device
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -27,6 +28,11 @@ SWITCH_DP_CODES = [
     "switch_usb1",
     "switch_usb2",
     "power",
+    "1",
+    "2",
+    "3",
+    "4",
+    "20",
 ]
 
 
@@ -39,17 +45,24 @@ async def async_setup_entry(
 
     entities: list[TuyaOEMSwitch] = []
     for dev_id, dev_data in coordinator.data.items():
-        # Check category or DPs
-        category = dev_data.get("category", "").lower()
-        dps = dev_data.get("dps_status", {})
-
-        # If it's a lighting device, let light.py handle it
-        if category in ("dj", "dd", "dc", "xdd", "fwd", "jsq"):
+        # If it's identified as a light device, let light.py handle it
+        if is_light_device(dev_data):
             continue
+
+        dps = dev_data.get("dps_status", {})
+        device_entities: list[TuyaOEMSwitch] = []
 
         for code in SWITCH_DP_CODES:
             if code in dps:
-                entities.append(TuyaOEMSwitch(coordinator, dev_id, code, brand_name))
+                device_entities.append(TuyaOEMSwitch(coordinator, dev_id, code, brand_name))
+
+        # Fallback: if device is not a light and had no standard switch DPs, create a primary switch
+        # so the device always appears in HA and can be controlled.
+        if not device_entities:
+            fallback_code = "1" if "1" in dps else ("20" if "20" in dps else "switch")
+            device_entities.append(TuyaOEMSwitch(coordinator, dev_id, fallback_code, brand_name))
+
+        entities.extend(device_entities)
 
     async_add_entities(entities)
 
@@ -67,18 +80,18 @@ class TuyaOEMSwitch(CoordinatorEntity[TuyaOEMDataCoordinator], SwitchEntity):
         """Initialize switch."""
         super().__init__(coordinator)
         self.device_id = device_id
-        self.dp_code = dp_code
+        self.dp_code = str(dp_code)
         self.brand_name = brand_name
 
         dev = coordinator.data.get(device_id, {})
-        base_name = dev.get("name") or dev.get("custom_name") or f"Device {device_id}"
+        base_name = dev.get("name") or dev.get("custom_name") or f"Device {device_id[:6]}"
 
         # If multi-switch, add suffix
-        if self.dp_code in ("switch", "power"):
+        if self.dp_code in ("switch", "power", "1", "20"):
             self._attr_name = base_name
             self._attr_unique_id = f"{device_id}_{dp_code}"
         else:
-            suffix = dp_code.replace("switch_", "Prise ").replace("switch_usb", "USB ")
+            suffix = self.dp_code.replace("switch_", "Prise ").replace("switch_usb", "USB ")
             self._attr_name = f"{base_name} {suffix}"
             self._attr_unique_id = f"{device_id}_{dp_code}"
 
@@ -98,12 +111,22 @@ class TuyaOEMSwitch(CoordinatorEntity[TuyaOEMDataCoordinator], SwitchEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn on switch."""
+        dev = self.coordinator.data.get(self.device_id, {})
+        dps = dev.setdefault("dps_status", {})
         await self.coordinator.async_send_command(
-            self.device_id, [{"code": self.dp_code, "value": True}]
+            self.device_id,
+            [{"code": self.dp_code, "value": True}],
         )
+        dps[self.dp_code] = True
+        self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn off switch."""
+        dev = self.coordinator.data.get(self.device_id, {})
+        dps = dev.setdefault("dps_status", {})
         await self.coordinator.async_send_command(
-            self.device_id, [{"code": self.dp_code, "value": False}]
+            self.device_id,
+            [{"code": self.dp_code, "value": False}],
         )
+        dps[self.dp_code] = False
+        self.async_write_ha_state()
