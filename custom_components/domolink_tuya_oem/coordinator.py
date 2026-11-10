@@ -102,6 +102,9 @@ class TuyaOEMDataCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                         except Exception as cloud_err:
                             _LOGGER.debug("Mobile cloud status for %s failed: %s", dev_id, cloud_err)
 
+                    if not status_dict and dev.get("dps"):
+                        status_dict = dev["dps"]
+
                     dev["dps_status"] = status_dict
                     devices_map[dev_id] = dev
 
