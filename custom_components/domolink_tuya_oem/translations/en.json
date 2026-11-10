@@ -8,6 +8,16 @@
           "mode": "Integration Mode"
         }
       },
+      "mobile": {
+        "title": "Mobile App Login (Recommended)",
+        "description": "Log in directly with your mobile app credentials (Smart Life, Tuya Smart, Thank's GiFi, Lidl Home, etc.). Your devices and their local keys will be imported automatically.",
+        "data": {
+          "brand": "Brand / Mobile App",
+          "username": "Email or Mobile Phone Number",
+          "password": "Password",
+          "country_code": "Country Code (e.g. 33)"
+        }
+      },
       "local_discovery": {
         "title": "Local LAN Control (100% Offline)",
         "description": "{count} Tuya / OEM device(s) discovered on your local network. Select your device and enter its 16-character local_key.",
