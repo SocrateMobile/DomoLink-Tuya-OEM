@@ -37,7 +37,7 @@ is_private_lan_ip = tuya_api.is_private_lan_ip
 
 
 def test_manifest_structure_and_version():
-    """Verify manifest.json has valid domain, codeowners, and version 2.0.3."""
+    """Verify manifest.json has valid domain, codeowners, and version 2.0.4."""
     manifest_path = os.path.join(COMPONENT_DIR, "manifest.json")
     assert os.path.isfile(manifest_path)
     with open(manifest_path, "r", encoding="utf-8") as f:
@@ -45,7 +45,7 @@ def test_manifest_structure_and_version():
 
     assert manifest["domain"] == "domolink_tuya_oem"
     assert manifest["name"] == "DomoLink Tuya OEM Multi-Brand"
-    assert manifest["version"] == "2.0.3"
+    assert manifest["version"] == "2.0.4"
     assert "@SocrateMobile" in manifest["codeowners"]
     assert "tuya-mobile>=1.2.0" in manifest["requirements"]
 
@@ -280,4 +280,17 @@ def test_brand_restricted_error_defined():
     assert issubclass(tuya_api.TuyaOEMBrandRestrictedError, tuya_api.TuyaOEMError)
     err = tuya_api.TuyaOEMBrandRestrictedError("Brand restricted")
     assert "Brand restricted" in str(err)
+
+
+def test_panel_contains_online_offline_filter_toggles():
+    """Verify domolink-tuya-panel.js includes interactive online/offline toggle filter logic."""
+    panel_js = os.path.join(COMPONENT_DIR, "frontend", "domolink-tuya-panel.js")
+    with open(panel_js, "r", encoding="utf-8") as f:
+        code = f.read()
+
+    assert "stat-filter-online" in code
+    assert "stat-filter-offline" in code
+    assert "_showOnline" in code
+    assert "_showOffline" in code
+
 
