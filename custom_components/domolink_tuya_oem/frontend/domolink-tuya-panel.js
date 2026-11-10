@@ -13,6 +13,8 @@ class DomolinkTuyaPanel extends HTMLElement {
     this._selectedCategory = "all";
     this._selectedBrand = "all";
     this._searchQuery = "";
+    this._showOnline = true;
+    this._showOffline = true;
     this._dashboardData = {
       summary: { total_devices: 0, online_count: 0, offline_count: 0, lan_count: 0, account_count: 0 },
       accounts: [],
@@ -354,6 +356,47 @@ class DomolinkTuyaPanel extends HTMLElement {
           display: flex;
           align-items: center;
           gap: 14px;
+        }
+        .stat-card.clickable {
+          cursor: pointer;
+          user-select: none;
+          transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .stat-card.clickable:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+        }
+        .stat-card.filter-online.active {
+          border-color: rgba(16, 185, 129, 0.45);
+          background: rgba(16, 185, 129, 0.08);
+          box-shadow: 0 0 16px rgba(16, 185, 129, 0.12);
+        }
+        .stat-card.filter-online.active:hover {
+          border-color: #10b981;
+          background: rgba(16, 185, 129, 0.16);
+          box-shadow: 0 0 20px rgba(16, 185, 129, 0.25);
+        }
+        .stat-card.filter-online.disabled {
+          opacity: 0.38;
+          filter: grayscale(0.85);
+          border-style: dashed;
+          background: rgba(22, 27, 34, 0.3);
+        }
+        .stat-card.filter-offline.active {
+          border-color: rgba(239, 68, 68, 0.45);
+          background: rgba(239, 68, 68, 0.08);
+          box-shadow: 0 0 16px rgba(239, 68, 68, 0.12);
+        }
+        .stat-card.filter-offline.active:hover {
+          border-color: #ef4444;
+          background: rgba(239, 68, 68, 0.16);
+          box-shadow: 0 0 20px rgba(239, 68, 68, 0.25);
+        }
+        .stat-card.filter-offline.disabled {
+          opacity: 0.38;
+          filter: grayscale(0.85);
+          border-style: dashed;
+          background: rgba(22, 27, 34, 0.3);
         }
         .stat-icon {
           font-size: 26px;
@@ -822,25 +865,25 @@ class DomolinkTuyaPanel extends HTMLElement {
 
       <!-- Stats Summary -->
       <div class="stats-row">
-        <div class="stat-card">
+        <div class="stat-card clickable" id="stat-filter-total" title="Afficher tous les appareils (réinitialiser les filtres)">
           <div class="stat-icon">📱</div>
           <div>
             <div class="stat-value">${summary.total_devices || 0}</div>
             <div class="stat-label">Total Appareils</div>
           </div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card clickable filter-online ${this._showOnline ? "active" : "disabled"}" id="stat-filter-online" title="${this._showOnline ? "Cliquer pour masquer les appareils en ligne" : "Cliquer pour afficher les appareils en ligne"}">
           <div class="stat-icon" style="color: #10b981;">🟢</div>
           <div>
             <div class="stat-value">${summary.online_count || 0}</div>
-            <div class="stat-label">En Ligne</div>
+            <div class="stat-label">En Ligne ${!this._showOnline ? "(Masqué)" : ""}</div>
           </div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card clickable filter-offline ${this._showOffline ? "active" : "disabled"}" id="stat-filter-offline" title="${this._showOffline ? "Cliquer pour masquer les appareils hors ligne" : "Cliquer pour afficher les appareils hors ligne"}">
           <div class="stat-icon" style="color: #ef4444;">🔴</div>
           <div>
             <div class="stat-value">${summary.offline_count || 0}</div>
-            <div class="stat-label">Hors Ligne</div>
+            <div class="stat-label">Hors Ligne ${!this._showOffline ? "(Masqué)" : ""}</div>
           </div>
         </div>
         <div class="stat-card">
@@ -868,6 +911,15 @@ class DomolinkTuyaPanel extends HTMLElement {
 
   _filterDevices(devices) {
     return devices.filter((dev) => {
+      // Online / Offline filter
+      const isOnline = Boolean(dev.online);
+      if (isOnline && !this._showOnline) {
+        return false;
+      }
+      if (!isOnline && !this._showOffline) {
+        return false;
+      }
+
       // Category filter
       if (this._selectedCategory !== "all" && dev.device_type !== this._selectedCategory) {
         return false;
@@ -891,7 +943,7 @@ class DomolinkTuyaPanel extends HTMLElement {
       <!-- Filters and Search -->
       <div class="filters-bar">
         <div class="filter-pills">
-          <div class="pill ${this._selectedCategory === "all" ? "active" : ""}" data-cat="all">Tous (${this._dashboardData.devices.length})</div>
+          <div class="pill ${this._selectedCategory === "all" ? "active" : ""}" data-cat="all">Tous (${devices.length})</div>
           <div class="pill ${this._selectedCategory === "light" ? "active" : ""}" data-cat="light">💡 Éclairages</div>
           <div class="pill ${this._selectedCategory === "switch" ? "active" : ""}" data-cat="switch">🔌 Prises & Switchs</div>
           <div class="pill ${this._selectedCategory === "camera" ? "active" : ""}" data-cat="camera">📹 Caméras</div>
@@ -1258,6 +1310,33 @@ class DomolinkTuyaPanel extends HTMLElement {
     if (tabSettings) {
       tabSettings.onclick = () => {
         this._activeTab = "settings";
+        this.render();
+      };
+    }
+
+    // Stats Online / Offline Filter Toggles
+    const filterOnline = root.querySelector("#stat-filter-online");
+    if (filterOnline) {
+      filterOnline.onclick = () => {
+        this._showOnline = !this._showOnline;
+        this.render();
+      };
+    }
+
+    const filterOffline = root.querySelector("#stat-filter-offline");
+    if (filterOffline) {
+      filterOffline.onclick = () => {
+        this._showOffline = !this._showOffline;
+        this.render();
+      };
+    }
+
+    const filterTotal = root.querySelector("#stat-filter-total");
+    if (filterTotal) {
+      filterTotal.onclick = () => {
+        this._showOnline = true;
+        this._showOffline = true;
+        this._selectedCategory = "all";
         this.render();
       };
     }
