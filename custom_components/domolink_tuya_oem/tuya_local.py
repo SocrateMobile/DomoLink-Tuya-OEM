@@ -17,6 +17,13 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 import threading
 from typing import Callable
 
+try:
+    import tinytuya
+    HAS_TINYTUYA = True
+except ImportError:
+    tinytuya = None
+    HAS_TINYTUYA = False
+
 _LOGGER = logging.getLogger(__name__)
 
 UDP_KEY = hashlib.md5(b"yGAdlopoPVldABfn").digest()
@@ -143,7 +150,7 @@ async def async_discover_devices(timeout: float = 3.0) -> dict[str, dict[str, An
 
 
 class TuyaLocalDevice:
-    """Client for controlling a single Tuya device via Local LAN."""
+    """Client for controlling a single Tuya device via Local LAN with multi-protocol support (3.1 to 3.5)."""
 
     def __init__(
         self,
@@ -161,6 +168,30 @@ class TuyaLocalDevice:
         self.port = port
         self.seq = 0
         self.dps: dict[str, Any] = {}
+        self._push_thread: threading.Thread | None = None
+        self._push_running = False
+
+        # Tinytuya Device initialization for 3.1, 3.2, 3.3, 3.4, and 3.5
+        self._tt_dev: Any = None
+        if HAS_TINYTUYA and tinytuya is not None:
+            try:
+                raw_key = self.local_key.decode("utf-8", errors="ignore") if isinstance(self.local_key, bytes) else str(self.local_key)
+                tt_ver = 3.3
+                try:
+                    tt_ver = float(self.version)
+                except ValueError:
+                    tt_ver = 3.3
+                self._tt_dev = tinytuya.Device(
+                    dev_id=self.device_id,
+                    address=self.ip,
+                    local_key=raw_key,
+                    version=tt_ver,
+                )
+                self._tt_dev.set_socketTimeout(1.2)
+                self._tt_dev.set_socketRetryLimit(1)
+            except Exception as e:
+                _LOGGER.debug("tinytuya init notice for %s: %s", self.device_id, e)
+                self._tt_dev = None
 
     def _pack_message(self, cmd: int, payload_bytes: bytes) -> bytes:
         """Build binary frame for Tuya protocol 3.1/3.3/3.4."""
@@ -237,84 +268,167 @@ class TuyaLocalDevice:
                     continue
         return None
 
+    def _send_native(self, dps_update: dict[str, Any]) -> bool:
+        """Native socket implementation for sending Tuya commands."""
+        now = int(time.time())
+        payload_dict = {
+            "gwId": self.device_id,
+            "devId": self.device_id,
+            "uid": self.device_id,
+            "t": str(now),
+            "dps": dps_update,
+        }
+
+        s: socket.socket | None = None
+        try:
+            enc_payload = self._encrypt_payload(payload_dict)
+            frame = self._pack_message(CMD_CONTROL, enc_payload)
+
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(1.2)
+            s.connect((self.ip, self.port))
+            s.sendall(frame)
+            resp = s.recv(1024)
+            self.dps.update(dps_update)
+            return True
+        except Exception as err:
+            _LOGGER.debug("Local command error on %s (%s): %s", self.device_id, self.ip, err)
+            return False
+        finally:
+            if s:
+                try:
+                    s.close()
+                except Exception:
+                    pass
+
     async def async_send_command(self, commands: list[dict[str, Any]]) -> bool:
-        """Send command to device over local TCP with fast 1.2s timeout."""
+        """Send command to device over local TCP with tinytuya (3.1-3.5) and native fallback."""
         loop = asyncio.get_running_loop()
+        dps_update = {str(c["code"]): c["value"] for c in commands}
 
-        def _send() -> bool:
-            # Build DPS dictionary
-            dps_update = {str(c["code"]): c["value"] for c in commands}
-            now = int(time.time())
-            payload_dict = {
-                "gwId": self.device_id,
-                "devId": self.device_id,
-                "uid": self.device_id,
-                "t": str(now),
-                "dps": dps_update,
-            }
+        if self._tt_dev is not None:
+            def _send_tt() -> bool:
+                try:
+                    res = self._tt_dev.set_multiple_values(dps_update)
+                    if isinstance(res, dict) and "Error" in res:
+                        _LOGGER.debug("tinytuya send noticed error on %s, trying native: %s", self.ip, res.get("Error"))
+                        return self._send_native(dps_update)
+                    self.dps.update(dps_update)
+                    return True
+                except Exception:
+                    return self._send_native(dps_update)
 
-            s: socket.socket | None = None
-            try:
-                enc_payload = self._encrypt_payload(payload_dict)
-                frame = self._pack_message(CMD_CONTROL, enc_payload)
+            return await loop.run_in_executor(None, _send_tt)
 
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.settimeout(1.2)
-                s.connect((self.ip, self.port))
-                s.sendall(frame)
-                resp = s.recv(1024)
-                self.dps.update(dps_update)
-                return True
-            except Exception as err:
-                _LOGGER.debug("Local command error on %s (%s): %s", self.device_id, self.ip, err)
-                return False
-            finally:
-                if s:
-                    try:
-                        s.close()
-                    except Exception:
-                        pass
+        return await loop.run_in_executor(None, self._send_native, dps_update)
 
-        return await loop.run_in_executor(None, _send)
+    def _poll_native(self) -> dict[str, Any]:
+        """Native socket implementation for polling Tuya status."""
+        now = int(time.time())
+        payload_dict = {
+            "gwId": self.device_id,
+            "devId": self.device_id,
+            "uid": self.device_id,
+            "t": str(now),
+            "dps": {},
+        }
+        s: socket.socket | None = None
+        try:
+            enc_payload = self._encrypt_payload(payload_dict)
+            frame = self._pack_message(CMD_DP_QUERY, enc_payload)
+
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(1.2)
+            s.connect((self.ip, self.port))
+            s.sendall(frame)
+            resp = s.recv(2048)
+
+            parsed = self._decrypt_payload(resp)
+            if parsed and "dps" in parsed and isinstance(parsed["dps"], dict):
+                self.dps.update(parsed["dps"])
+        except Exception as err:
+            _LOGGER.debug("Local poll error on %s: %s", self.ip, err)
+        finally:
+            if s:
+                try:
+                    s.close()
+                except Exception:
+                    pass
+        return self.dps
 
     async def async_poll_status(self) -> dict[str, Any]:
-        """Poll DPS status from device over local TCP with fast 1.2s timeout."""
+        """Poll DPS status from device over local TCP (tinytuya 3.1-3.5 + native fallback)."""
         loop = asyncio.get_running_loop()
 
-        def _poll() -> dict[str, Any]:
-            now = int(time.time())
-            payload_dict = {
-                "gwId": self.device_id,
-                "devId": self.device_id,
-                "uid": self.device_id,
-                "t": str(now),
-                "dps": {},
-            }
-            s: socket.socket | None = None
+        if self._tt_dev is not None:
+            def _poll_tt() -> dict[str, Any]:
+                try:
+                    res = self._tt_dev.status()
+                    if isinstance(res, dict) and "dps" in res and isinstance(res["dps"], dict) and res["dps"]:
+                        self.dps.update(res["dps"])
+                        return self.dps
+                    return self._poll_native()
+                except Exception:
+                    return self._poll_native()
+
+            return await loop.run_in_executor(None, _poll_tt)
+
+        return await loop.run_in_executor(None, self._poll_native)
+
+    def start_push_listener(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        callback: Callable[[dict[str, Any]], None],
+    ) -> None:
+        """Start background listening thread for real-time unsolicited push packets."""
+        if self._push_thread is not None or self._tt_dev is None:
+            return
+        self._push_running = True
+        self._push_thread = threading.Thread(
+            target=self._run_push_listener,
+            args=(loop, callback),
+            daemon=True,
+            name=f"TuyaPush_{self.device_id[:6]}",
+        )
+        self._push_thread.start()
+
+    def stop_push_listener(self) -> None:
+        """Stop real-time push listener and close socket."""
+        self._push_running = False
+        if self._tt_dev is not None:
             try:
-                enc_payload = self._encrypt_payload(payload_dict)
-                frame = self._pack_message(CMD_DP_QUERY, enc_payload)
+                self._tt_dev.close()
+            except Exception:
+                pass
+        if self._push_thread and self._push_thread.is_alive():
+            self._push_thread.join(timeout=0.5)
+            self._push_thread = None
 
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.settimeout(1.2)
-                s.connect((self.ip, self.port))
-                s.sendall(frame)
-                resp = s.recv(2048)
+    def close(self) -> None:
+        """Close connection and stop any running thread."""
+        self.stop_push_listener()
 
-                parsed = self._decrypt_payload(resp)
-                if parsed and "dps" in parsed and isinstance(parsed["dps"], dict):
-                    self.dps.update(parsed["dps"])
-            except Exception as err:
-                _LOGGER.debug("Local poll error on %s: %s", self.ip, err)
-            finally:
-                if s:
-                    try:
-                        s.close()
-                    except Exception:
-                        pass
-            return self.dps
+    def _run_push_listener(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        callback: Callable[[dict[str, Any]], None],
+    ) -> None:
+        """Worker loop reading pushed packets from device over persistent connection."""
+        if not self._tt_dev:
+            return
+        try:
+            self._tt_dev.set_socketPersistent(True)
+        except Exception:
+            pass
 
-        return await loop.run_in_executor(None, _poll)
+        while self._push_running:
+            try:
+                msg = self._tt_dev.receive()
+                if isinstance(msg, dict) and "dps" in msg and isinstance(msg["dps"], dict) and msg["dps"]:
+                    self.dps.update(msg["dps"])
+                    loop.call_soon_threadsafe(callback, msg["dps"])
+            except Exception:
+                time.sleep(1.0)
 
 
 class TuyaLocalDiscoveryListener:

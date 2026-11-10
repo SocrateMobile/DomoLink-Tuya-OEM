@@ -66,18 +66,30 @@ class TuyaOEMDataCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             return
         self.lan_resolver._bind_device(dev_id, ip, local_key, version=version, method="udp")
 
+    def _handle_local_device_push(self, dev_id: str, new_dps: dict[str, Any]) -> None:
+        """Handle real-time unsolicited state push from Tuya local device."""
+        if self.data and dev_id in self.data:
+            self.data[dev_id].setdefault("dps_status", {}).update(new_dps)
+            self.async_set_updated_data(self.data)
+
     async def async_start_local_discovery(self) -> None:
         """Start UDP listener and run multi-stage cascade LAN resolution."""
         self.lan_resolver.start_udp_listener()
         await self.lan_resolver.async_resolve_missing_ips()
 
     async def async_stop_local_discovery(self) -> None:
-        """Stop background UDP listener."""
+        """Stop background UDP listener and close all local connections."""
         self.lan_resolver.stop_udp_listener()
+        for dev in list(self.local_devices.values()):
+            try:
+                dev.close()
+            except Exception:
+                pass
 
     async def async_auto_bind_lan_devices(self) -> None:
         """Scan local network to bind any known devices with local keys."""
-        await self.lan_resolver.async_resolve_missing_ips(force=True)
+        try:
+            await self.lan_resolver.async_resolve_missing_ips(force=True)
         except Exception as e:
             _LOGGER.debug("Auto bind LAN scan notice: %s", e)
 
