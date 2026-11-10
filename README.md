@@ -1,5 +1,7 @@
 # DomoLink Tuya OEM Multi-Brand for Home Assistant
-
+ 
+ // Arrêté pour le moment //
+ 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
 [![Home Assistant](https://img.shields.io/badge/Home--Assistant-2024.1%2B-blue.svg)](https://www.home-assistant.io/)
 
