@@ -22,6 +22,8 @@ _LOGGER = logging.getLogger(__name__)
 UDP_KEY = hashlib.md5(b"yGAdlopoPVldABfn").digest()
 PREFIX_55AA = 0x000055AA
 SUFFIX_AA55 = 0x0000AA55
+PREFIX_6699 = 0x00006699
+SUFFIX_9966 = 0x00009966
 
 CMD_CONTROL = 0x07
 CMD_STATUS = 0x08
@@ -46,10 +48,10 @@ def decrypt_udp_packet(raw_data: bytes) -> dict[str, Any] | None:
     except Exception:
         pass
 
-    # 2. Encrypted packet check (starts with 0x000055AA)
+    # 2. Encrypted packet check (starts with 0x000055AA or 0x00006699)
     try:
         prefix = struct.unpack(">I", raw_data[:4])[0]
-        if prefix != PREFIX_55AA:
+        if prefix not in (PREFIX_55AA, PREFIX_6699):
             return None
 
         # Payload is either offset 20 or 16 depending on retcode
@@ -391,3 +393,71 @@ class TuyaLocalDiscoveryListener:
                 s.close()
             except Exception:
                 pass
+
+
+async def async_validate_ip(
+    device_id: str,
+    ip: str,
+    local_key: str,
+    version: str = "3.3",
+    timeout: float = 0.8,
+) -> bool:
+    """Cryptographically validate that an IP belongs to device_id using its local_key."""
+    try:
+        dev = TuyaLocalDevice(
+            device_id=device_id,
+            ip=ip,
+            local_key=local_key,
+            version=version,
+        )
+        dps = await asyncio.wait_for(dev.async_poll_status(), timeout=timeout)
+        return bool(dps) or (len(dev.dps) > 0)
+    except Exception:
+        return False
+
+
+async def async_scan_subnet_for_device(
+    device_id: str,
+    local_key: str,
+    candidate_ips: list[str],
+    version: str = "3.3",
+    concurrency: int = 32,
+) -> str | None:
+    """Probe candidate IPs on port 6668 in parallel and return the cryptographically verified IP."""
+    if not candidate_ips:
+        return None
+
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async def _probe(ip: str) -> str | None:
+        async with semaphore:
+            # 1. Fast TCP handshake check (0.25s)
+            try:
+                _, writer = await asyncio.wait_for(
+                    asyncio.open_connection(ip, 6668),
+                    timeout=0.25,
+                )
+                writer.close()
+                await writer.wait_closed()
+            except Exception:
+                return None
+
+            # 2. Cryptographic payload validation with local_key
+            valid = await async_validate_ip(device_id, ip, local_key, version=version, timeout=0.8)
+            if valid:
+                return ip
+            return None
+
+    tasks = [asyncio.create_task(_probe(ip)) for ip in candidate_ips]
+    for fut in asyncio.as_completed(tasks):
+        try:
+            res = await fut
+            if res:
+                for t in tasks:
+                    if not t.done():
+                        t.cancel()
+                return res
+        except Exception:
+            pass
+
+    return None
