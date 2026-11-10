@@ -75,7 +75,7 @@ is_private_lan_ip = tuya_api.is_private_lan_ip
 
 
 def test_manifest_structure_and_version():
-    """Verify manifest.json has valid domain, codeowners, and version 2.2.0."""
+    """Verify manifest.json has valid domain, codeowners, and version 2.3.0."""
     manifest_path = os.path.join(COMPONENT_DIR, "manifest.json")
     assert os.path.isfile(manifest_path)
     with open(manifest_path, "r", encoding="utf-8") as f:
@@ -83,7 +83,7 @@ def test_manifest_structure_and_version():
 
     assert manifest["domain"] == "domolink_tuya_oem"
     assert manifest["name"] == "DomoLink Tuya OEM Multi-Brand"
-    assert manifest["version"] == "2.2.0"
+    assert manifest["version"] == "2.3.0"
     assert "@SocrateMobile" in manifest["codeowners"]
     assert "tuya-mobile>=1.2.0" in manifest["requirements"]
     assert any("tinytuya" in req for req in manifest["requirements"])
@@ -513,7 +513,7 @@ def test_platforms_include_number_and_select():
     const_spec.loader.exec_module(const)
     assert "number" in const.PLATFORMS
     assert "select" in const.PLATFORMS
-    assert const.VERSION == "2.2.0"
+    assert const.VERSION == "2.3.0"
 
 
 def test_tinytuya_local_device_integration():
@@ -540,6 +540,30 @@ def test_tinytuya_local_device_integration():
     # Push listener lifecycle
     dev_34.close()
     assert dev_34._push_running is False
+
+
+def test_diagnostics_redacts_sensitive_keys():
+    """Verify diagnostics module defines redaction for passwords, secrets, and local_keys."""
+    diag_spec = importlib.util.spec_from_file_location(
+        "diagnostics",
+        os.path.join(COMPONENT_DIR, "diagnostics.py"),
+    )
+    diag = importlib.util.module_from_spec(diag_spec)
+    diag_spec.loader.exec_module(diag)
+    assert "local_key" in diag.TO_REDACT
+    assert "password" in diag.TO_REDACT
+    assert "secret" in diag.TO_REDACT
+
+
+def test_panel_contains_export_button():
+    """Verify domolink-tuya-panel.js includes technical sheet export logic."""
+    panel_js = os.path.join(COMPONENT_DIR, "frontend", "domolink-tuya-panel.js")
+    with open(panel_js, "r", encoding="utf-8") as f:
+        code = f.read()
+    assert "btn-export-device" in code
+    assert "_exportDeviceCard" in code
+    assert "fiche_technique.json" in code
+
 
 
 
