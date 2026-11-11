@@ -193,6 +193,11 @@ class TuyaLocalDevice:
                 _LOGGER.debug("tinytuya init notice for %s: %s", self.device_id, e)
                 self._tt_dev = None
 
+    @property
+    def is_connected(self) -> bool:
+        """Return True if local device is configured with a valid private LAN IP."""
+        return bool(self.ip and is_private_lan_ip(self.ip))
+
     def _pack_message(self, cmd: int, payload_bytes: bytes) -> bytes:
         """Build binary frame for Tuya protocol 3.1/3.3/3.4."""
         self.seq += 1
@@ -362,14 +367,28 @@ class TuyaLocalDevice:
 
         if self._tt_dev is not None:
             def _poll_tt() -> dict[str, Any]:
+                # Try preferred protocol version first, then fallback across 3.3, 3.1, 3.4
+                versions_to_try: list[float] = []
                 try:
-                    res = self._tt_dev.status()
-                    if isinstance(res, dict) and "dps" in res and isinstance(res["dps"], dict) and res["dps"]:
-                        self.dps.update(res["dps"])
-                        return self.dps
-                    return self._poll_native()
-                except Exception:
-                    return self._poll_native()
+                    versions_to_try.append(float(self.version))
+                except ValueError:
+                    pass
+                for v in (3.3, 3.1, 3.4, 3.5):
+                    if v not in versions_to_try:
+                        versions_to_try.append(v)
+
+                for v in versions_to_try:
+                    try:
+                        self._tt_dev.set_version(v)
+                        res = self._tt_dev.status()
+                        if isinstance(res, dict) and "dps" in res and isinstance(res["dps"], dict) and res["dps"]:
+                            self.version = str(v)
+                            self.dps.update(res["dps"])
+                            return self.dps
+                    except Exception:
+                        continue
+
+                return self._poll_native()
 
             return await loop.run_in_executor(None, _poll_tt)
 
