@@ -139,7 +139,11 @@ def classify_device(dev_data: dict[str, Any], user_override: str | None = None) 
     if any(k in dps for k in ("basic_private", "motion_switch", "movement_detect_pic", "ptz_control", "105", "115", "134", "159")):
         return "camera"
 
-    # 3. Light DPs & Keywords (Careful: check type of DP 20!)
+    # 3. Explicit Switch / Socket / Plug / Strip Keywords
+    if any(k in name for k in SWITCH_KEYWORDS) or any(k in prod_name for k in SWITCH_KEYWORDS):
+        return "switch"
+
+    # 4. Light DPs & Keywords (Careful: check type of DP 20!)
     if any(k in name for k in LIGHT_KEYWORDS) or any(k in prod_name for k in LIGHT_KEYWORDS):
         return "light"
     if any(k in dps for k in ("switch_led", "bright_value", "bright_value_v2", "temp_value", "colour_data", "colour_data_v2")):
@@ -150,8 +154,6 @@ def classify_device(dev_data: dict[str, Any], user_override: str | None = None) 
     if isinstance(dp20, bool) and any(k in dps for k in ("21", "22", "23", "24", "25")):
         return "light"
     if "1" in dps and isinstance(dps.get("1"), bool) and any(k in dps for k in ("2", "3", "4", "5")) and not any(k in dps for k in ("cur_power", "cur_voltage", "18", "19")):
-        return "light"
-    if any(k in dps for k in ("22", "23", "24")):
         return "light"
 
     # 4. Climate DPs & Keywords

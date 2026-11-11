@@ -73,17 +73,22 @@ class TuyaOEMLight(CoordinatorEntity[TuyaOEMDataCoordinator], LightEntity):
             model=dev.get("product_name") or dev.get("model") or "Tuya OEM Light",
         )
 
-        # Detect color modes (Home Assistant requires ONOFF only if no other mode is present)
+        # Detect color modes adhering strictly to Home Assistant rules:
+        # If any color mode (HS, COLOR_TEMP) is present, BRIGHTNESS and ONOFF must NOT be included.
+        # If only brightness is supported, BRIGHTNESS is used alone.
+        # Otherwise, ONOFF is used alone.
         dps = dev.get("dps_status", {})
         modes: set[ColorMode] = set()
         if any(k in dps for k in ("colour_data", "colour_data_v2", "24", "5")):
             modes.add(ColorMode.HS)
         if any(k in dps for k in ("temp_value", "temp_value_v2", "23", "4")):
             modes.add(ColorMode.COLOR_TEMP)
-        if any(k in dps for k in ("bright_value", "bright_value_v2", "22", "3")):
-            modes.add(ColorMode.BRIGHTNESS)
+
         if not modes:
-            modes.add(ColorMode.ONOFF)
+            if any(k in dps for k in ("bright_value", "bright_value_v2", "22", "3")):
+                modes.add(ColorMode.BRIGHTNESS)
+            else:
+                modes.add(ColorMode.ONOFF)
 
         self._attr_supported_color_modes = modes
 

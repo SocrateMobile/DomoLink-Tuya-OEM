@@ -127,6 +127,13 @@ def test_classify_device():
         "dps_status": {"1": True, "18": 1500, "19": 6500, "20": 2305},
     }
     assert classify_device(plug_dev) == "switch"
+    # Power Strip with multi-switch DPs (21, 22, 23, 24) must be switch, not light
+    power_strip = {
+        "name": "LSC Prise Multiple",
+        "product_name": "Power Strip",
+        "dps_status": {"1": True, "20": 2300, "21": True, "22": False, "23": True, "24": False},
+    }
+    assert classify_device(power_strip) == "switch"
     # 4. Camera by category and DPs
     cam_dev = {
         "name": "Camera Entree",
