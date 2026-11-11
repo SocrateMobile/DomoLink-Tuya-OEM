@@ -73,15 +73,17 @@ class TuyaOEMLight(CoordinatorEntity[TuyaOEMDataCoordinator], LightEntity):
             model=dev.get("product_name") or dev.get("model") or "Tuya OEM Light",
         )
 
-        # Detect color modes
+        # Detect color modes (Home Assistant requires ONOFF only if no other mode is present)
         dps = dev.get("dps_status", {})
-        modes: set[ColorMode] = {ColorMode.ONOFF}
-        if any(k in dps for k in ("bright_value", "bright_value_v2", "22", "3")):
-            modes.add(ColorMode.BRIGHTNESS)
-        if any(k in dps for k in ("temp_value", "temp_value_v2", "23", "4")):
-            modes.add(ColorMode.COLOR_TEMP)
+        modes: set[ColorMode] = set()
         if any(k in dps for k in ("colour_data", "colour_data_v2", "24", "5")):
             modes.add(ColorMode.HS)
+        if any(k in dps for k in ("temp_value", "temp_value_v2", "23", "4")):
+            modes.add(ColorMode.COLOR_TEMP)
+        if any(k in dps for k in ("bright_value", "bright_value_v2", "22", "3")):
+            modes.add(ColorMode.BRIGHTNESS)
+        if not modes:
+            modes.add(ColorMode.ONOFF)
 
         self._attr_supported_color_modes = modes
 
@@ -243,7 +245,7 @@ class TuyaOEMLight(CoordinatorEntity[TuyaOEMDataCoordinator], LightEntity):
         """Return device state attributes including control path and LAN metrics."""
         dev = self.coordinator.data.get(self.device_id, {})
         is_lan = self.device_id in self.coordinator.local_devices and self.coordinator.local_devices[self.device_id].is_connected
-        lan_info = self.coordinator.lan_resolver.get_device_lan_status(self.device_id) if getattr(self.coordinator, "lan_resolver", None) else {}
+        lan_info = self.coordinator.lan_resolver.get_device_lan_info(self.device_id) if getattr(self.coordinator, "lan_resolver", None) else {}
         attrs: dict[str, Any] = {
             "control_path": "local" if is_lan else "cloud",
             "lan_ip": lan_info.get("ip") or dev.get("ip"),

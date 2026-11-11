@@ -107,6 +107,10 @@ class LanResolver:
             "failed_attempts": self._failed_attempts.get(device_id, 0),
         }
 
+    def get_device_lan_status(self, device_id: str) -> dict[str, Any]:
+        """Alias for get_device_lan_info for backward compatibility."""
+        return self.get_device_lan_info(device_id)
+
     def start_udp_listener(self) -> None:
         """Start background continuous UDP discovery listener."""
         if self._listener is None and self.hass:

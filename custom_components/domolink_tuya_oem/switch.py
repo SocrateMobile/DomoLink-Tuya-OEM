@@ -172,7 +172,7 @@ class TuyaOEMSwitch(CoordinatorEntity[TuyaOEMDataCoordinator], SwitchEntity):
         """Return device state attributes including control path and LAN metrics."""
         dev = self.coordinator.data.get(self.device_id, {})
         is_lan = self.device_id in self.coordinator.local_devices and self.coordinator.local_devices[self.device_id].is_connected
-        lan_info = self.coordinator.lan_resolver.get_device_lan_status(self.device_id) if getattr(self.coordinator, "lan_resolver", None) else {}
+        lan_info = self.coordinator.lan_resolver.get_device_lan_info(self.device_id) if getattr(self.coordinator, "lan_resolver", None) else {}
         attrs: dict[str, Any] = {
             "control_path": "local" if is_lan else "cloud",
             "lan_ip": lan_info.get("ip") or dev.get("ip"),

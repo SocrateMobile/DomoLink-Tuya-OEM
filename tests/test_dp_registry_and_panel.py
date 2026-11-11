@@ -592,6 +592,28 @@ def test_coordinator_has_listener_property():
     assert "def _listener(" in code
 
 
+def test_tuya_local_is_connected_and_private_ip():
+    """Verify tuya_local defines is_private_lan_ip and is_connected property."""
+    import tuya_local
+    assert hasattr(tuya_local, "is_private_lan_ip")
+    assert tuya_local.is_private_lan_ip("192.168.1.50") is True
+    assert tuya_local.is_private_lan_ip("80.215.1.1") is False
+    dev = tuya_local.TuyaLocalDevice("test_id", "192.168.1.50", "key123")
+    assert dev.is_connected is True
+    dev_wan = tuya_local.TuyaLocalDevice("test_id", "80.215.1.1", "key123")
+    assert dev_wan.is_connected is False
+
+
+def test_lan_resolver_has_status_and_info_methods():
+    """Verify LanResolver provides both get_device_lan_info and get_device_lan_status."""
+    lr_path = os.path.join(COMPONENT_DIR, "lan_resolver.py")
+    with open(lr_path, "r", encoding="utf-8") as f:
+        code = f.read()
+    assert "def get_device_lan_info(" in code
+    assert "def get_device_lan_status(" in code
+
+
+
 
 
 
