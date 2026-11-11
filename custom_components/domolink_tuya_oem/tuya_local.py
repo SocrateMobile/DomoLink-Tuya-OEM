@@ -26,6 +26,27 @@ except ImportError:
 
 _LOGGER = logging.getLogger(__name__)
 
+
+def is_private_lan_ip(ip_str: str | None) -> bool:
+    """Check if an IP string is a valid private IPv4 LAN address (RFC 1918)."""
+    if not ip_str or not isinstance(ip_str, str):
+        return False
+    parts = ip_str.strip().split(".")
+    if len(parts) != 4:
+        return False
+    try:
+        b0, b1 = int(parts[0]), int(parts[1])
+        if b0 == 10:
+            return True
+        if b0 == 172 and 16 <= b1 <= 31:
+            return True
+        if b0 == 192 and b1 == 168:
+            return True
+        return False
+    except ValueError:
+        return False
+
+
 UDP_KEY = hashlib.md5(b"yGAdlopoPVldABfn").digest()
 PREFIX_55AA = 0x000055AA
 SUFFIX_AA55 = 0x0000AA55
