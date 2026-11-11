@@ -167,6 +167,21 @@ class TuyaOEMSwitch(CoordinatorEntity[TuyaOEMDataCoordinator], SwitchEntity):
         dps = dev.get("dps_status", {})
         return bool(dps.get(self.dp_code, False))
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return device state attributes including control path and LAN metrics."""
+        dev = self.coordinator.data.get(self.device_id, {})
+        is_lan = self.device_id in self.coordinator.local_devices and self.coordinator.local_devices[self.device_id].is_connected
+        lan_info = self.coordinator.lan_resolver.get_device_lan_status(self.device_id) if getattr(self.coordinator, "lan_resolver", None) else {}
+        attrs: dict[str, Any] = {
+            "control_path": "local" if is_lan else "cloud",
+            "lan_ip": lan_info.get("ip") or dev.get("ip"),
+            "protocol_version": lan_info.get("version") or dev.get("protocol_version"),
+        }
+        if dev.get("room_name"):
+            attrs["room"] = dev.get("room_name")
+        return attrs
+
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn on switch."""
         dev = self.coordinator.data.get(self.device_id, {})

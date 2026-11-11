@@ -266,3 +266,40 @@ class TuyaOEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
         return self.async_show_form(step_id="cloud", data_schema=schema, errors=errors)
+
+    async def async_step_dhcp(self, discovery_info: Any) -> FlowResult:
+        """Handle discovery via DHCP broadcast to automatically re-bind moving IP addresses."""
+        raw_mac = getattr(discovery_info, "macaddress", "")
+        ip = getattr(discovery_info, "ip", "")
+        if not raw_mac or not ip:
+            return self.async_abort(reason="already_configured")
+
+        mac = raw_mac.replace(":", "").replace("-", "").lower()
+        _LOGGER.debug("DHCP broadcast received for Tuya device MAC %s -> IP %s", mac, ip)
+
+        domain_data = self.hass.data.get(DOMAIN, {})
+        for entry_id, hub_data in domain_data.items():
+            if not isinstance(hub_data, dict):
+                continue
+            coordinator = hub_data.get("coordinator")
+            if not coordinator or not coordinator.data:
+                continue
+
+            for dev_id, dev in coordinator.data.items():
+                dev_mac = (dev.get("mac") or "").replace(":", "").replace("-", "").lower()
+                if dev_mac and dev_mac == mac:
+                    _LOGGER.info(
+                        "DHCP match: Tuya device %s (%s) got IP %s",
+                        dev_id,
+                        dev.get("name"),
+                        ip,
+                    )
+                    local_key = dev.get("local_key")
+                    if local_key and getattr(coordinator, "lan_resolver", None):
+                        coordinator.lan_resolver._bind_device(
+                            dev_id, ip, local_key, method="dhcp"
+                        )
+                    break
+
+        return self.async_abort(reason="already_configured")
+
