@@ -7,14 +7,6 @@
   ],
   "config_flow": true,
   "dependencies": [],
-  "documentation": "https://socratemobile.fr/integration.html?id=domolink-tuya-oem",
-  "integration_type": "hub",
-  "iot_class": "local_polling",
-  "issue_tracker": "https://github.com/SocrateMobile/DomoLink-Tuya-OEM/issues",
-  "requirements": [
-    "tuya-mobile>=1.2.0",
-    "tinytuya>=1.16.0"
-  ],
   "dhcp": [
     {"macaddress": "D8F15B*"},
     {"macaddress": "10D561*"},
@@ -24,6 +16,14 @@
     {"macaddress": "68572D*"},
     {"macaddress": "508A06*"},
     {"macaddress": "2462AB*"}
+  ],
+  "documentation": "https://socratemobile.fr/integration.html?id=domolink-tuya-oem",
+  "integration_type": "hub",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/SocrateMobile/DomoLink-Tuya-OEM/issues",
+  "requirements": [
+    "tuya-mobile>=1.2.0",
+    "tinytuya>=1.16.0"
   ],
   "version": "2.3.4"
 }
