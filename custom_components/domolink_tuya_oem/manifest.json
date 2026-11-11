@@ -6,7 +6,10 @@
     "@jflavigne"
   ],
   "config_flow": true,
-  "dependencies": [],
+  "dependencies": [
+    "frontend",
+    "http"
+  ],
   "dhcp": [
     {"macaddress": "D8F15B*"},
     {"macaddress": "10D561*"},
