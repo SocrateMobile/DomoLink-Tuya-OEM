@@ -565,6 +565,34 @@ def test_panel_contains_export_button():
     assert "fiche_technique.json" in code
 
 
+def test_panel_contains_room_filter():
+    """Verify domolink-tuya-panel.js includes room dropdown filter."""
+    panel_js = os.path.join(COMPONENT_DIR, "frontend", "domolink-tuya-panel.js")
+    with open(panel_js, "r", encoding="utf-8") as f:
+        code = f.read()
+    assert "_selectedRoom" in code
+    assert "select-room-filter" in code
+    assert "room-select" in code
+
+
+def test_config_flow_has_dhcp_step():
+    """Verify config_flow.py contains async_step_dhcp handler."""
+    cfg_flow_path = os.path.join(COMPONENT_DIR, "config_flow.py")
+    with open(cfg_flow_path, "r", encoding="utf-8") as f:
+        code = f.read()
+    assert "async_step_dhcp" in code
+    assert "already_configured" in code
+
+
+def test_coordinator_has_listener_property():
+    """Verify coordinator.py has _listener property backward compatibility."""
+    coord_path = os.path.join(COMPONENT_DIR, "coordinator.py")
+    with open(coord_path, "r", encoding="utf-8") as f:
+        code = f.read()
+    assert "def _listener(" in code
+
+
+
 
 
 

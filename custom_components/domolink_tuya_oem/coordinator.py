@@ -148,12 +148,17 @@ class TuyaOEMDataCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             self.data[device_id]["device_type"] = caps["device_type"]
             self.async_set_updated_data(self.data)
 
+    @property
+    def _listener(self) -> Any:
+        """Backward compatible reference to the LAN resolver UDP listener."""
+        return getattr(self.lan_resolver, "_listener", None)
+
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
         """Fetch latest device states (Local LAN, Mobile Cloud or Developer Cloud)."""
         await self._async_ensure_overrides()
 
         # Start discovery listener once in background if not already started
-        if self._listener is None and self.hass:
+        if getattr(self.lan_resolver, "_listener", None) is None and self.hass:
             self.hass.async_create_task(self.async_start_local_discovery())
 
         # --- 1. SINGLE LOCAL LAN MODE ---

@@ -11,6 +11,7 @@ class DomolinkTuyaPanel extends HTMLElement {
     this._hass = null;
     this._activeTab = "devices"; // "devices" | "settings"
     this._selectedCategory = "all";
+    this._selectedRoom = "all";
     this._selectedBrand = "all";
     this._searchQuery = "";
     this._showOnline = true;
@@ -431,6 +432,23 @@ class DomolinkTuyaPanel extends HTMLElement {
           display: flex;
           flex-wrap: wrap;
           gap: 8px;
+          align-items: center;
+        }
+        .room-select {
+          background: rgba(22, 27, 34, 0.85);
+          border: 1px solid rgba(255, 255, 255, 0.14);
+          border-radius: 20px;
+          color: #e6edf3;
+          padding: 6px 14px;
+          font-size: 13px;
+          font-weight: 500;
+          cursor: pointer;
+          outline: none;
+          transition: all 0.2s ease;
+        }
+        .room-select:hover, .room-select:focus {
+          border-color: #3b82f6;
+          box-shadow: 0 0 10px rgba(59, 130, 246, 0.3);
         }
         .pill {
           background: rgba(255, 255, 255, 0.05);
@@ -933,6 +951,13 @@ class DomolinkTuyaPanel extends HTMLElement {
       if (this._selectedCategory !== "all" && dev.device_type !== this._selectedCategory) {
         return false;
       }
+      // Room filter
+      if (this._selectedRoom !== "all") {
+        const room = dev.room_name || dev.room || "Non assigné";
+        if (room !== this._selectedRoom) {
+          return false;
+        }
+      }
       // Search query
       if (this._searchQuery) {
         const q = this._searchQuery.toLowerCase();
@@ -948,6 +973,9 @@ class DomolinkTuyaPanel extends HTMLElement {
   }
 
   _renderDevicesTab(devices) {
+    const allDevs = this._dashboardData.devices || [];
+    const rooms = Array.from(new Set(allDevs.map((d) => d.room_name || d.room).filter(Boolean))).sort();
+
     return `
       <!-- Filters and Search -->
       <div class="filters-bar">
@@ -960,6 +988,13 @@ class DomolinkTuyaPanel extends HTMLElement {
           <div class="pill ${this._selectedCategory === "security" ? "active" : ""}" data-cat="security">🛡️ Sécurité</div>
           <div class="pill ${this._selectedCategory === "climate" ? "active" : ""}" data-cat="climate">❄️ Climatisation</div>
           <div class="pill ${this._selectedCategory === "cover" ? "active" : ""}" data-cat="cover">🪟 Volets</div>
+
+          ${rooms.length > 0 ? `
+            <select class="room-select" id="select-room-filter" title="Filtrer par pièce">
+              <option value="all" ${this._selectedRoom === "all" ? "selected" : ""}>🏠 Toutes les pièces</option>
+              ${rooms.map((r) => `<option value="${this._escapeHtml(r)}" ${this._selectedRoom === r ? "selected" : ""}>📍 ${this._escapeHtml(r)}</option>`).join("")}
+            </select>
+          ` : ""}
         </div>
 
         <div class="search-box">
@@ -1381,6 +1416,16 @@ class DomolinkTuyaPanel extends HTMLElement {
         this._showOnline = true;
         this._showOffline = true;
         this._selectedCategory = "all";
+        this._selectedRoom = "all";
+        this.render();
+      };
+    }
+
+    // Room Filter Select
+    const roomSelect = root.querySelector("#select-room-filter");
+    if (roomSelect) {
+      roomSelect.onchange = (e) => {
+        this._selectedRoom = e.target.value;
         this.render();
       };
     }
