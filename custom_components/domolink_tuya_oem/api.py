@@ -362,29 +362,23 @@ async def ws_remove_account(
 async def ws_scan_lan(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
-    """Scan local network for UDP Tuya broadcasts and match with known devices."""
-    discovered = await async_discover_devices(timeout=3.0)
+    """Scan local network using UDP, ARP and TCP subnet scanning to bind all Tuya devices."""
     domain_data = hass.data.get(DOMAIN, {})
+    total_resolved = 0
 
-    updated_count = 0
-    for dev_id, info in discovered.items():
-        ip = info.get("ip")
-        ver = info.get("version", "3.3")
-        if not ip:
-            continue
-        for entry_id, data in domain_data.items():
-            if isinstance(data, dict) and "coordinator" in data:
-                coord: TuyaOEMDataCoordinator = data["coordinator"]
-                if dev_id in coord.devices or dev_id in coord.data:
-                    coord._handle_local_device_discovered(dev_id, ip, ver)
-                    updated_count += 1
+    for entry_id, data in domain_data.items():
+        if isinstance(data, dict) and "coordinator" in data:
+            coord: TuyaOEMDataCoordinator = data["coordinator"]
+            if hasattr(coord, "lan_resolver"):
+                resolved = await coord.lan_resolver.async_resolve_missing_ips(force=True)
+                total_resolved += resolved
 
     connection.send_result(
         msg["id"],
         {
-            "found_count": len(discovered),
-            "updated_count": updated_count,
-            "discovered": discovered,
+            "found_count": total_resolved,
+            "updated_count": total_resolved,
+            "success": True,
         },
     )
 

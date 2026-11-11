@@ -273,6 +273,16 @@ class TuyaOEMDataCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                     devices_map[dev_id] = dev
 
                 self.devices = devices_map
+
+                # Background LAN resolution for any devices missing verified private IP
+                if self.hass:
+                    has_missing_ips = any(
+                        not d.get("ip") or not is_private_lan_ip(d.get("ip"))
+                        for d in devices_map.values()
+                    )
+                    if has_missing_ips:
+                        self.hass.async_create_task(self.lan_resolver.async_resolve_missing_ips())
+
                 return devices_map
             except Exception as err:
                 raise UpdateFailed(f"Erreur de communication mobile {self.brand_name}: {err}") from err
@@ -307,6 +317,16 @@ class TuyaOEMDataCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                     devices_map[dev_id] = dev
 
                 self.devices = devices_map
+
+                # Background LAN resolution for any devices missing verified private IP
+                if self.hass:
+                    has_missing_ips = any(
+                        not d.get("ip") or not is_private_lan_ip(d.get("ip"))
+                        for d in devices_map.values()
+                    )
+                    if has_missing_ips:
+                        self.hass.async_create_task(self.lan_resolver.async_resolve_missing_ips())
+
                 return devices_map
             except TuyaOEMError as err:
                 raise UpdateFailed(f"Erreur de communication avec le Cloud Tuya {self.brand_name}: {err}") from err

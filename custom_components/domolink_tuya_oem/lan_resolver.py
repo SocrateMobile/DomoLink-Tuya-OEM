@@ -308,7 +308,8 @@ class LanResolver:
     def _get_candidate_subnets(self) -> list[list[str]]:
         """Compute list of /24 IP ranges to probe based on known IPs and network adapters."""
         known_ips: set[str] = set()
-        for dev in self.coordinator.devices.values():
+        devices = self.coordinator.devices or self.coordinator.data or {}
+        for dev in devices.values():
             ip = dev.get("ip")
             if is_private_lan_ip(ip):
                 known_ips.add(ip)
@@ -325,9 +326,8 @@ class LanResolver:
                 subnets_found.add(prefix)
 
         # Fallback to standard RFC1918 home subnets if none detected yet
-        if not subnets_found:
-            subnets_found.add("192.168.1")
-            subnets_found.add("192.168.0")
+        subnets_found.add("192.168.1")
+        subnets_found.add("192.168.0")
 
         # Generate all 1-254 addresses for each detected prefix (capped to /24)
         result: list[list[str]] = []
