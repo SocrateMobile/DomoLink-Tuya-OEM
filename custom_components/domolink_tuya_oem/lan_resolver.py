@@ -131,7 +131,10 @@ class LanResolver:
         if not is_private_lan_ip(ip):
             return
 
-        dev = self.coordinator.devices.get(dev_id) or self.coordinator.data.get(dev_id)
+        dev = (
+            (self.coordinator.devices.get(dev_id) if hasattr(self.coordinator, "devices") and self.coordinator.devices else None)
+            or (self.coordinator.data.get(dev_id) if getattr(self.coordinator, "data", None) else None)
+        )
         if not dev:
             return
 
